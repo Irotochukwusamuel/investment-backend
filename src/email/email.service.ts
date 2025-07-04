@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { EmailProvider } from './email-provider.interface';
 import { BrevoEmailProvider } from './providers/brevo.provider';
 import { NodemailerEmailProvider } from './providers/nodemailer.provider';
+import { ResendEmailProvider } from './providers/resend.provider';
 import { ConsoleEmailProvider } from './providers/console.provider';
 import { emailTemplates, EmailTemplateData } from './email-templates';
 
@@ -16,6 +17,7 @@ export class EmailService {
     private readonly configService: ConfigService,
     private readonly brevoProvider: BrevoEmailProvider,
     private readonly nodemailerProvider: NodemailerEmailProvider,
+    private readonly resendProvider: ResendEmailProvider,
     private readonly consoleProvider: ConsoleEmailProvider,
   ) {
     const preferredProvider = this.configService.get<string>('EMAIL_PROVIDER', 'brevo');
@@ -24,10 +26,14 @@ export class EmailService {
     switch (preferredProvider.toLowerCase()) {
       case 'brevo':
         this.activeProvider = this.brevoProvider;
-        this.fallbackProvider = this.nodemailerProvider;
+        this.fallbackProvider = this.resendProvider;
         break;
       case 'nodemailer':
         this.activeProvider = this.nodemailerProvider;
+        this.fallbackProvider = this.resendProvider;
+        break;
+      case 'resend':
+        this.activeProvider = this.resendProvider;
         this.fallbackProvider = this.brevoProvider;
         break;
       case 'console':
@@ -36,7 +42,7 @@ export class EmailService {
         break;
       default:
         this.activeProvider = this.brevoProvider;
-        this.fallbackProvider = this.nodemailerProvider;
+        this.fallbackProvider = this.resendProvider;
     }
 
     this.logger.log(`Email service initialized with ${this.activeProvider.getProviderName()} as primary provider`);

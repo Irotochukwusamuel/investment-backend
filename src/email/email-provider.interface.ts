@@ -6,7 +6,7 @@ export interface EmailProvider {
 }
 
 export interface EmailConfig {
-  provider: 'brevo' | 'nodemailer' | 'console';
+  provider: 'brevo' | 'nodemailer' | 'resend' | 'console';
   brevo?: {
     apiKey: string;
     senderEmail: string;
@@ -20,6 +20,11 @@ export interface EmailConfig {
       user: string;
       pass: string;
     };
+    senderEmail: string;
+    senderName: string;
+  };
+  resend?: {
+    apiKey: string;
     senderEmail: string;
     senderName: string;
   };

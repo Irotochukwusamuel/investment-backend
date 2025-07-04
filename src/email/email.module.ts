@@ -4,6 +4,7 @@ import { EmailService } from './email.service';
 import { EmailController } from './email.controller';
 import { BrevoEmailProvider } from './providers/brevo.provider';
 import { NodemailerEmailProvider } from './providers/nodemailer.provider';
+import { ResendEmailProvider } from './providers/resend.provider';
 import { ConsoleEmailProvider } from './providers/console.provider';
 
 @Module({
@@ -13,6 +14,7 @@ import { ConsoleEmailProvider } from './providers/console.provider';
     EmailService,
     BrevoEmailProvider,
     NodemailerEmailProvider,
+    ResendEmailProvider,
     ConsoleEmailProvider,
   ],
   exports: [EmailService],

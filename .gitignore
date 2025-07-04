@@ -3,6 +3,11 @@
 /node_modules
 /build
 
+# Compiled files in src (shouldn't be there)
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
+
 # Logs
 logs
 *.log
