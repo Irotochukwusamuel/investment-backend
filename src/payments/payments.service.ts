@@ -408,9 +408,9 @@ export class PaymentsService {
     try {
       if (data.status === 'SUCCESS' || data.status === 'FAILED') {
         // Handle withdrawal webhook directly
-        const withdrawal = await this.withdrawalModel.findOne({ reference: data.reference });
+        const withdrawal = await this.withdrawalModel.findOne({ reference: data.CustomerReference });
         if (!withdrawal) {
-          this.logger.error(`Withdrawal not found for webhook reference: ${data.reference}`);
+          this.logger.error(`Withdrawal not found for webhook reference: ${data.CustomerReference}`);
           return;
         }
 
