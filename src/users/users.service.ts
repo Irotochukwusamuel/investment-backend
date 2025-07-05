@@ -7,6 +7,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateBankDetailsDto, UpdateBankDetailsDto } from './dto/bank-details.dto';
 import { EmailService } from '../email/email.service';
+import { WalletService } from '../wallet/wallet.service';
 import * as bcrypt from 'bcrypt';
 import { Role } from './enums/role.enum';
 
@@ -16,6 +17,7 @@ export class UsersService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(BankDetails.name) private bankDetailsModel: Model<BankDetailsDocument>,
     private readonly emailService: EmailService,
+    private readonly walletService: WalletService,
   ) {}
 
   // Generate unique referral code
@@ -172,6 +174,9 @@ export class UsersService {
       // Log error but don't fail user creation
       console.error('Failed to send welcome email:', error);
     }
+
+    // Automatically create default wallets for new users
+    await this.walletService.createDefaultWallets(savedUser._id.toString());
 
     return savedUser;
   }

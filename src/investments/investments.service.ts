@@ -58,15 +58,13 @@ export class InvestmentsService {
     const hasBalance = await this.walletService.checkBalance(
       userId, 
       createInvestmentRequestDto.amount, 
-      createInvestmentRequestDto.currency,
-      WalletType.MAIN
+      createInvestmentRequestDto.currency
     );
 
     if (!hasBalance) {
       const currentBalance = await this.walletService.getBalance(
         userId, 
-        createInvestmentRequestDto.currency,
-        WalletType.MAIN
+        createInvestmentRequestDto.currency
       );
       throw new BadRequestException(
         `Insufficient balance. Current balance: ${currentBalance} ${createInvestmentRequestDto.currency.toUpperCase()}, Required: ${createInvestmentRequestDto.amount} ${createInvestmentRequestDto.currency.toUpperCase()}`
@@ -124,9 +122,9 @@ export class InvestmentsService {
     // Process referral bonus if user was referred by someone
     const user = await this.usersService.findById(userId);
     if (user.referredBy && referralBonus > 0) {
-      // Add referral bonus to referrer's wallet
+      // Add referral bonus to referrer's main wallet
       await this.walletService.deposit(user.referredBy.toString(), {
-        walletType: WalletType.PROFIT,
+        walletType: WalletType.MAIN,
         amount: referralBonus,
         currency: createInvestmentRequestDto.currency,
         description: `Referral bonus from ${user.firstName} ${user.lastName}`,
@@ -506,9 +504,9 @@ export class InvestmentsService {
     const user = await this.usersService.findById(userId);
     const currency = activeInvestments[0]?.currency || 'naira';
 
-    // Add bonus to user's profit wallet
+    // Add bonus to user's main wallet
     await this.walletService.deposit(userId, {
-      walletType: WalletType.PROFIT,
+      walletType: WalletType.MAIN,
       amount: totalBonus,
       currency,
       description: 'Bonus withdrawal (Welcome + Referral bonuses)',

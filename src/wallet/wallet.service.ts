@@ -97,21 +97,22 @@ export class WalletService {
   async deposit(userId: string, depositDto: DepositDto): Promise<WalletDocument> {
     const { walletType, amount, currency, description } = depositDto;
     
+    // Always use main wallet for all deposits
     let wallet: WalletDocument | null = await this.walletModel.findOne({
       userId: new Types.ObjectId(userId),
-      type: walletType,
+      type: WalletType.MAIN,
     });
 
     if (!wallet) {
-      // Create wallet if it doesn't exist
+      // Create main wallet if it doesn't exist
       wallet = await this.create({
         userId,
-        type: walletType,
+        type: WalletType.MAIN,
         nairaBalance: currency === 'naira' ? amount : 0,
         usdtBalance: currency === 'usdt' ? amount : 0,
       });
     } else {
-      // Update existing wallet
+      // Update existing main wallet
       if (currency === 'naira') {
         wallet.nairaBalance += amount;
         wallet.totalDeposits += amount;
@@ -120,9 +121,16 @@ export class WalletService {
         wallet.totalDeposits += amount;
       }
       
-      // Track earnings from ROI
-      if (description && description.toLowerCase().includes('roi')) {
-        wallet.totalEarnings += amount;
+      // Track different types of earnings based on description
+      if (description) {
+        const desc = description.toLowerCase();
+        if (desc.includes('roi') || desc.includes('profit') || desc.includes('earnings')) {
+          wallet.totalEarnings += amount;
+        } else if (desc.includes('bonus') || desc.includes('reward')) {
+          wallet.totalBonuses += amount;
+        } else if (desc.includes('referral') || desc.includes('ref')) {
+          wallet.totalReferralEarnings += amount;
+        }
       }
       
       wallet.lastTransactionDate = new Date();
@@ -135,8 +143,10 @@ export class WalletService {
   async withdraw(userId: string, withdrawalDto: WithdrawalDto): Promise<WalletDocument> {
     const { walletType, amount, currency, description } = withdrawalDto;
     
-    const wallet = await this.findByUserAndType(userId, walletType);
-    
+    // Always use main wallet for all withdrawals
+    const wallet = await this.findByUserAndType(userId, WalletType.MAIN);
+
+    // Check sufficient balance
     if (currency === 'naira' && wallet.nairaBalance < amount) {
       throw new BadRequestException('Insufficient naira balance');
     }
@@ -144,6 +154,7 @@ export class WalletService {
       throw new BadRequestException('Insufficient USDT balance');
     }
 
+    // Deduct from main wallet
     if (currency === 'naira') {
       wallet.nairaBalance -= amount;
       wallet.totalWithdrawals += amount;
@@ -152,53 +163,23 @@ export class WalletService {
       wallet.totalWithdrawals += amount;
     }
 
-    // Track investment amounts
-    if (description && description.toLowerCase().includes('investment')) {
-      wallet.totalInvestments += amount;
-    }
-    
     wallet.lastTransactionDate = new Date();
-    await wallet.save();
-    return wallet;
+    return wallet.save();
   }
 
   async transfer(userId: string, transferDto: TransferDto): Promise<{ fromWallet: WalletDocument; toWallet: WalletDocument }> {
     const { fromWallet, toWallet, amount, currency } = transferDto;
     
-    if (fromWallet === toWallet) {
-      throw new BadRequestException('Cannot transfer to the same wallet');
-    }
+    // Since we only have one main wallet now, transfers are just internal tracking
+    // Both fromWallet and toWallet will be the same main wallet
+    const wallet = await this.findByUserAndType(userId, WalletType.MAIN);
 
-    const sourceWallet = await this.findByUserAndType(userId, fromWallet);
-    const destinationWallet = await this.findByUserAndType(userId, toWallet);
+    // For tracking purposes, we can log the transfer but no actual balance change
+    // since it's within the same wallet
+    wallet.lastTransactionDate = new Date();
+    await wallet.save();
 
-    // Check sufficient balance
-    if (currency === 'naira' && sourceWallet.nairaBalance < amount) {
-      throw new BadRequestException('Insufficient naira balance');
-    }
-    if (currency === 'usdt' && sourceWallet.usdtBalance < amount) {
-      throw new BadRequestException('Insufficient USDT balance');
-    }
-
-    // Deduct from source wallet
-    if (currency === 'naira') {
-      sourceWallet.nairaBalance -= amount;
-    } else {
-      sourceWallet.usdtBalance -= amount;
-    }
-    sourceWallet.lastTransactionDate = new Date();
-    await sourceWallet.save();
-
-    // Add to destination wallet
-    if (currency === 'naira') {
-      destinationWallet.nairaBalance += amount;
-    } else {
-      destinationWallet.usdtBalance += amount;
-    }
-    destinationWallet.lastTransactionDate = new Date();
-    await destinationWallet.save();
-
-    return { fromWallet: sourceWallet, toWallet: destinationWallet };
+    return { fromWallet: wallet, toWallet: wallet };
   }
 
   async getWalletStats(userId?: string): Promise<any> {
@@ -238,9 +219,9 @@ export class WalletService {
     };
   }
 
-  async checkBalance(userId: string, amount: number, currency: 'naira' | 'usdt', walletType: WalletType = WalletType.MAIN): Promise<boolean> {
+  async checkBalance(userId: string, amount: number, currency: 'naira' | 'usdt'): Promise<boolean> {
     try {
-      const wallet = await this.findByUserAndType(userId, walletType);
+      const wallet = await this.findByUserAndType(userId, WalletType.MAIN);
       
       if (currency === 'naira') {
         return wallet.nairaBalance >= amount;
@@ -253,9 +234,9 @@ export class WalletService {
     }
   }
 
-  async getBalance(userId: string, currency: 'naira' | 'usdt', walletType: WalletType = WalletType.MAIN): Promise<number> {
+  async getBalance(userId: string, currency: 'naira' | 'usdt'): Promise<number> {
     try {
-      const wallet = await this.findByUserAndType(userId, walletType);
+      const wallet = await this.findByUserAndType(userId, WalletType.MAIN);
       
       if (currency === 'naira') {
         return wallet.nairaBalance;
@@ -269,34 +250,14 @@ export class WalletService {
   }
 
   async createDefaultWallets(userId: string): Promise<WalletDocument[]> {
-    const wallets: WalletDocument[] = [];
-    // Create main wallet
+    // Create only one main wallet that handles all transactions
     const mainWallet = await this.create({
       userId,
       type: WalletType.MAIN,
       nairaBalance: 0,
       usdtBalance: 0,
     });
-    wallets.push(mainWallet);
 
-    // Create profit wallet
-    const profitWallet = await this.create({
-      userId,
-      type: WalletType.PROFIT,
-      nairaBalance: 0,
-      usdtBalance: 0,
-    });
-    wallets.push(profitWallet);
-
-    // Create bonus wallet
-    const bonusWallet = await this.create({
-      userId,
-      type: WalletType.BONUS,
-      nairaBalance: 0,
-      usdtBalance: 0,
-    });
-    wallets.push(bonusWallet);
-
-    return wallets;
+    return [mainWallet];
   }
 } 

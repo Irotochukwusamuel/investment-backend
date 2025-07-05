@@ -5,6 +5,7 @@ import { UsersController } from './users.controller';
 import { User, UserSchema } from './schemas/user.schema';
 import { BankDetails, BankDetailsSchema } from './schemas/bank-details.schema';
 import { EmailModule } from '../email/email.module';
+import { WalletModule } from '../wallet/wallet.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { EmailModule } from '../email/email.module';
       { name: BankDetails.name, schema: BankDetailsSchema },
     ]),
     EmailModule,
+    WalletModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

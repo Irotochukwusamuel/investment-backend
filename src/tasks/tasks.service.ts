@@ -135,17 +135,17 @@ export class TasksService {
           
           await investment.save();
           
-          // Update user's profit wallet
+          // Update user's main wallet with ROI
           if (investment.currency === 'naira') {
             await this.walletService.deposit(investment.userId.toString(), {
-              walletType: WalletType.PROFIT,
+              walletType: WalletType.MAIN,
               amount: hourlyRoiAmount,
               currency: 'naira',
               description: `Hourly ROI payment for investment`,
             });
           } else {
             await this.walletService.deposit(investment.userId.toString(), {
-              walletType: WalletType.PROFIT,
+              walletType: WalletType.MAIN,
               amount: hourlyRoiAmount,
               currency: 'usdt',
               description: `Hourly ROI payment for investment`,
