@@ -12,6 +12,8 @@ import { UsersService } from '../users/users.service';
 import { TransactionsService } from '../transactions/transactions.service';
 import { TransactionType, TransactionStatus } from '../transactions/schemas/transaction.schema';
 import { EmailService } from '../email/email.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/schemas/notification.schema';
 
 @Injectable()
 export class InvestmentsService {
@@ -22,6 +24,7 @@ export class InvestmentsService {
     private readonly usersService: UsersService,
     private readonly transactionsService: TransactionsService,
     private readonly emailService: EmailService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async createFromRequest(createInvestmentRequestDto: CreateInvestmentRequestDto, userId: string): Promise<Investment> {
@@ -142,7 +145,24 @@ export class InvestmentsService {
         status: TransactionStatus.SUCCESS,
         investmentId: investment._id.toString(),
       });
+
+      // Create notification for referral bonus
+      await this.notificationsService.createBonusNotification(
+        user.referredBy.toString(),
+        'Referral Bonus Earned',
+        `You earned ₦${referralBonus.toLocaleString()} referral bonus from ${user.firstName} ${user.lastName}'s investment.`,
+        NotificationType.SUCCESS
+      );
     }
+
+    // Create notification for successful investment
+    await this.notificationsService.createInvestmentNotification(
+      userId,
+      'Investment Created Successfully',
+      `Your investment of ₦${createInvestmentRequestDto.amount.toLocaleString()} in ${plan.name} has been created successfully.`,
+      NotificationType.SUCCESS,
+      investment._id
+    );
 
     // Send investment confirmation email
     try {
@@ -203,6 +223,7 @@ export class InvestmentsService {
       .populate('userId', 'firstName lastName email')
       .populate('planId', 'name description dailyRoi totalRoi')
       .populate('transactionId', 'amount currency type status')
+      .populate('payoutHistory', 'amount currency type status createdAt description reference')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -219,6 +240,7 @@ export class InvestmentsService {
       .populate('userId', 'firstName lastName email')
       .populate('planId', 'name description dailyRoi totalRoi')
       .populate('transactionId', 'amount currency type status')
+      .populate('payoutHistory', 'amount currency type status createdAt description reference')
       .exec();
 
     if (!investment) {
@@ -247,6 +269,7 @@ export class InvestmentsService {
       .find(filter)
       .populate('planId', 'name description dailyRoi totalRoi')
       .populate('transactionId', 'amount currency type status')
+      .populate('payoutHistory', 'amount currency type status createdAt description reference')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -437,6 +460,7 @@ export class InvestmentsService {
       .find({ status: InvestmentStatus.ACTIVE })
       .populate('userId', 'firstName lastName email')
       .populate('planId', 'name description dailyRoi')
+      .populate('payoutHistory', 'amount currency type status createdAt description reference')
       .sort({ nextRoiUpdate: 1 })
       .exec();
   }

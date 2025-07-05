@@ -204,6 +204,27 @@ export class Transaction {
   @Prop({ default: null })
   executedAt?: Date;
 
+  @ApiProperty({ description: 'Withdrawal-specific fields' })
+  @Prop({ type: Object, default: null })
+  withdrawalDetails?: {
+    withdrawalId?: Types.ObjectId;
+    withdrawalMethod?: 'bank_transfer' | 'crypto';
+    bankDetails?: {
+      bankName: string;
+      accountNumber: string;
+      accountName: string;
+      bankCode: string;
+      sortCode: string;
+    };
+    cryptoDetails?: {
+      walletAddress: string;
+      network: string;
+    };
+    isAutoDisburseEligible?: boolean;
+    requiresManualApproval?: boolean;
+    manualApprovalReason?: string;
+  };
+
   @ApiProperty({ description: 'Transaction created at timestamp' })
   createdAt: Date;
 

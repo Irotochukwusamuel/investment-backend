@@ -13,6 +13,10 @@ import { EmailModule } from './email/email.module';
 import { TasksModule } from './tasks/tasks.module';
 import { SeedsModule } from './seeds/seeds.module';
 import { ConfirmationCodesModule } from './confirmation-codes/confirmation-codes.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { PaymentsModule } from './payments/payments.module';
+import { RealtimeModule } from './realtime/realtime.module';
+import { WithdrawalsModule } from './withdrawals/withdrawals.module';
 
 @Module({
   imports: [
@@ -50,7 +54,12 @@ import { ConfirmationCodesModule } from './confirmation-codes/confirmation-codes
     TasksModule,
     SeedsModule,
     ConfirmationCodesModule,
+    NotificationsModule,
+    PaymentsModule,
+    RealtimeModule,
+    WithdrawalsModule,
   ],
   controllers: [AppController],
+  providers: [],
 })
 export class AppModule {}

@@ -15,7 +15,9 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagg
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { CreateBankDetailsDto, UpdateBankDetailsDto } from './dto/bank-details.dto';
 import { User } from './schemas/user.schema';
+import { BankDetails } from './schemas/bank-details.schema';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('users')
@@ -41,6 +43,75 @@ export class UsersController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async updateProfile(@Request() req: any, @Body() updateUserDto: UpdateUserDto): Promise<User> {
     return this.usersService.update(req.user.id, updateUserDto);
+  }
+
+  // Bank Details Endpoints
+  @Post('bank-details')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create or update bank details' })
+  @ApiResponse({ status: 201, description: 'Bank details created successfully', type: BankDetails })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async createBankDetails(@Request() req: any, @Body() createBankDetailsDto: CreateBankDetailsDto): Promise<BankDetails> {
+    return this.usersService.createBankDetails(req.user.id, createBankDetailsDto);
+  }
+
+  @Get('bank-details')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get user bank details' })
+  @ApiResponse({ status: 200, description: 'Bank details retrieved successfully', type: [BankDetails] })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getBankDetails(@Request() req: any): Promise<BankDetails[]> {
+    return this.usersService.getBankDetails(req.user.id);
+  }
+
+  @Get('bank-details/active')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get active bank details' })
+  @ApiResponse({ status: 200, description: 'Active bank details retrieved successfully', type: BankDetails })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getActiveBankDetails(@Request() req: any): Promise<BankDetails | null> {
+    return this.usersService.getActiveBankDetails(req.user.id);
+  }
+
+  @Get('bank-details/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get bank details by ID' })
+  @ApiResponse({ status: 200, description: 'Bank details retrieved successfully', type: BankDetails })
+  @ApiResponse({ status: 404, description: 'Bank details not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getBankDetailsById(@Request() req: any, @Param('id') id: string): Promise<BankDetails> {
+    return this.usersService.getBankDetailsById(req.user.id, id);
+  }
+
+  @Patch('bank-details/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update bank details' })
+  @ApiResponse({ status: 200, description: 'Bank details updated successfully', type: BankDetails })
+  @ApiResponse({ status: 404, description: 'Bank details not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async updateBankDetails(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() updateBankDetailsDto: UpdateBankDetailsDto
+  ): Promise<BankDetails> {
+    return this.usersService.updateBankDetails(req.user.id, id, updateBankDetailsDto);
+  }
+
+  @Delete('bank-details/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete bank details' })
+  @ApiResponse({ status: 204, description: 'Bank details deleted successfully' })
+  @ApiResponse({ status: 404, description: 'Bank details not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async deleteBankDetails(@Request() req: any, @Param('id') id: string): Promise<void> {
+    return this.usersService.deleteBankDetails(req.user.id, id);
   }
 
   @Post()

@@ -120,19 +120,22 @@ InvestmentSchema.index({ createdAt: -1 });
 // Virtual for formatted earned amount
 InvestmentSchema.virtual('earnedAmountFormatted').get(function() {
   const currency = this.currency === 'naira' ? '₦' : 'USDT';
-  return `${currency}${this.earnedAmount.toLocaleString()}`;
+  const value = typeof this.earnedAmount === 'number' ? this.earnedAmount : 0;
+  return `${currency}${value.toLocaleString()}`;
 });
 
 // Virtual for formatted expected return
 InvestmentSchema.virtual('expectedReturnFormatted').get(function() {
   const currency = this.currency === 'naira' ? '₦' : 'USDT';
-  return `${currency}${this.expectedReturn.toLocaleString()}`;
+  const value = typeof this.expectedReturn === 'number' ? this.expectedReturn : 0;
+  return `${currency}${value.toLocaleString()}`;
 });
 
 // Virtual for formatted amount
 InvestmentSchema.virtual('amountFormatted').get(function() {
   const currency = this.currency === 'naira' ? '₦' : 'USDT';
-  return `${currency}${this.amount.toLocaleString()}`;
+  const value = typeof this.amount === 'number' ? this.amount : 0;
+  return `${currency}${value.toLocaleString()}`;
 });
 
 // Virtual for days remaining
@@ -153,6 +156,15 @@ InvestmentSchema.virtual('progressPercentage').get(function() {
   const elapsed = now.getTime() - start.getTime();
   const percentage = (elapsed / totalDuration) * 100;
   return Math.min(100, Math.max(0, percentage));
+});
+
+// Virtual for payout history - fetches ROI transactions for this investment
+InvestmentSchema.virtual('payoutHistory', {
+  ref: 'Transaction',
+  localField: '_id',
+  foreignField: 'investmentId',
+  match: { type: 'roi' },
+  options: { sort: { createdAt: -1 } }
 });
 
 // Ensure virtual fields are serialized

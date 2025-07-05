@@ -145,7 +145,9 @@ InvestmentPlanSchema.virtual('totalRoiFormatted').get(function() {
 // Virtual for formatted amount range
 InvestmentPlanSchema.virtual('amountRange').get(function() {
   const currency = this.currency === 'naira' ? '₦' : 'USDT';
-  return `${currency}${this.minAmount.toLocaleString()} - ${currency}${this.maxAmount.toLocaleString()}`;
+  const min = typeof this.minAmount === 'number' ? this.minAmount.toLocaleString() : '0';
+  const max = typeof this.maxAmount === 'number' ? this.maxAmount.toLocaleString() : '0';
+  return `${currency}${min} - ${currency}${max}`;
 });
 
 // Virtual for formatted duration

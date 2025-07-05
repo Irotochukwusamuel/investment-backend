@@ -16,7 +16,11 @@ export class TransactionsService {
     private readonly usersService: UsersService,
   ) {}
 
-  async create(createTransactionDto: CreateTransactionDto): Promise<Transaction> {
+  async create(createTransactionDto: CreateTransactionDto & { 
+    paymentMethod?: string; 
+    externalReference?: string; 
+    paymentDetails?: any; 
+  }): Promise<Transaction> {
     const transaction = new this.transactionModel({
       ...createTransactionDto,
       userId: new Types.ObjectId(createTransactionDto.userId),
@@ -75,6 +79,22 @@ export class TransactionsService {
     }
     
     return savedTransaction;
+  }
+
+  async updateByReference(reference: string, updateData: { 
+    status?: TransactionStatus; 
+    processedAt?: Date; 
+    externalReference?: string; 
+  }): Promise<Transaction> {
+    const transaction = await this.transactionModel
+      .findOneAndUpdate({ reference }, updateData, { new: true, runValidators: true })
+      .exec();
+    
+    if (!transaction) {
+      throw new NotFoundException('Transaction not found');
+    }
+    
+    return transaction;
   }
 
   async findAll(query: any = {}): Promise<Transaction[]> {

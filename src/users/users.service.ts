@@ -2,8 +2,10 @@ import { Injectable, NotFoundException, ConflictException, BadRequestException }
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User, UserDocument } from './schemas/user.schema';
+import { BankDetails, BankDetailsDocument } from './schemas/bank-details.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { CreateBankDetailsDto, UpdateBankDetailsDto } from './dto/bank-details.dto';
 import { EmailService } from '../email/email.service';
 import * as bcrypt from 'bcrypt';
 import { Role } from './enums/role.enum';
@@ -12,6 +14,7 @@ import { Role } from './enums/role.enum';
 export class UsersService {
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(BankDetails.name) private bankDetailsModel: Model<BankDetailsDocument>,
     private readonly emailService: EmailService,
   ) {}
 
@@ -405,25 +408,120 @@ export class UsersService {
     totalInvested: number;
     totalEarnings: number;
   }> {
-    const stats = await this.userModel.aggregate([
-      {
-        $group: {
-          _id: null,
-          totalUsers: { $sum: 1 },
-          activeUsers: { $sum: { $cond: [{ $eq: ['$isActive', true] }, 1, 0] } },
-          verifiedUsers: { $sum: { $cond: [{ $eq: ['$isEmailVerified', true] }, 1, 0] } },
-          totalInvested: { $sum: '$totalInvested' },
-          totalEarnings: { $sum: '$totalEarnings' },
-        },
-      },
+    const [
+      totalUsers,
+      activeUsers,
+      verifiedUsers,
+      totalInvested,
+      totalEarnings,
+    ] = await Promise.all([
+      this.userModel.countDocuments(),
+      this.userModel.countDocuments({ isActive: true }),
+      this.userModel.countDocuments({ emailVerified: true }),
+      this.userModel.aggregate([
+        { $group: { _id: null, total: { $sum: '$totalInvested' } } }
+      ]).then(result => result[0]?.total || 0),
+      this.userModel.aggregate([
+        { $group: { _id: null, total: { $sum: '$totalEarnings' } } }
+      ]).then(result => result[0]?.total || 0),
     ]);
 
-    return stats[0] || {
-      totalUsers: 0,
-      activeUsers: 0,
-      verifiedUsers: 0,
-      totalInvested: 0,
-      totalEarnings: 0,
+    return {
+      totalUsers,
+      activeUsers,
+      verifiedUsers,
+      totalInvested,
+      totalEarnings,
     };
+  }
+
+  // Bank Details Methods
+  async createBankDetails(userId: string, createBankDetailsDto: CreateBankDetailsDto): Promise<BankDetails> {
+    // Check if user exists
+    const user = await this.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Deactivate existing bank details
+    await this.bankDetailsModel.updateMany(
+      { userId: new Types.ObjectId(userId) },
+      { isActive: false }
+    );
+
+    // Create new bank details
+    const bankDetails = new this.bankDetailsModel({
+      ...createBankDetailsDto,
+      userId: new Types.ObjectId(userId),
+      isActive: true,
+      isVerified: true, // Mark as verified since it's coming from FINTAVA verification
+      verifiedAt: new Date(),
+    });
+
+    return bankDetails.save();
+  }
+
+  async updateBankDetails(userId: string, bankDetailsId: string, updateBankDetailsDto: UpdateBankDetailsDto): Promise<BankDetails> {
+    if (!Types.ObjectId.isValid(bankDetailsId)) {
+      throw new BadRequestException('Invalid bank details ID');
+    }
+
+    const bankDetails = await this.bankDetailsModel.findOne({
+      _id: bankDetailsId,
+      userId: new Types.ObjectId(userId),
+    });
+
+    if (!bankDetails) {
+      throw new NotFoundException('Bank details not found');
+    }
+
+    Object.assign(bankDetails, updateBankDetailsDto);
+    return bankDetails.save();
+  }
+
+  async getBankDetails(userId: string): Promise<BankDetails[]> {
+    return this.bankDetailsModel.find({
+      userId: new Types.ObjectId(userId),
+      isActive: true,
+    }).sort({ createdAt: -1 }).exec();
+  }
+
+  async getBankDetailsById(userId: string, bankDetailsId: string): Promise<BankDetails> {
+    if (!Types.ObjectId.isValid(bankDetailsId)) {
+      throw new BadRequestException('Invalid bank details ID');
+    }
+
+    const bankDetails = await this.bankDetailsModel.findOne({
+      _id: bankDetailsId,
+      userId: new Types.ObjectId(userId),
+    });
+
+    if (!bankDetails) {
+      throw new NotFoundException('Bank details not found');
+    }
+
+    return bankDetails;
+  }
+
+  async deleteBankDetails(userId: string, bankDetailsId: string): Promise<void> {
+    if (!Types.ObjectId.isValid(bankDetailsId)) {
+      throw new BadRequestException('Invalid bank details ID');
+    }
+
+    const result = await this.bankDetailsModel.deleteOne({
+      _id: bankDetailsId,
+      userId: new Types.ObjectId(userId),
+    });
+
+    if (result.deletedCount === 0) {
+      throw new NotFoundException('Bank details not found');
+    }
+  }
+
+  async getActiveBankDetails(userId: string): Promise<BankDetails | null> {
+    return this.bankDetailsModel.findOne({
+      userId: new Types.ObjectId(userId),
+      isActive: true,
+    }).exec();
   }
 } 

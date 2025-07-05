@@ -1,6 +1,6 @@
 import { PartialType, ApiProperty } from '@nestjs/swagger';
 import { CreateTransactionDto } from './create-transaction.dto';
-import { IsEnum, IsOptional } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsDate, IsObject } from 'class-validator';
 import { TransactionStatus } from '../schemas/transaction.schema';
 
 export class UpdateTransactionDto extends PartialType(CreateTransactionDto) {
@@ -8,4 +8,29 @@ export class UpdateTransactionDto extends PartialType(CreateTransactionDto) {
   @IsEnum(TransactionStatus)
   @IsOptional()
   status?: TransactionStatus;
+
+  @ApiProperty({ description: 'External reference from payment provider', required: false })
+  @IsString()
+  @IsOptional()
+  externalReference?: string;
+
+  @ApiProperty({ description: 'Processing date', required: false })
+  @IsDate()
+  @IsOptional()
+  processedAt?: Date;
+
+  @ApiProperty({ description: 'Failed date', required: false })
+  @IsDate()
+  @IsOptional()
+  failedAt?: Date;
+
+  @ApiProperty({ description: 'Failure reason', required: false })
+  @IsString()
+  @IsOptional()
+  failureReason?: string;
+
+  @ApiProperty({ description: 'Transaction metadata', required: false })
+  @IsObject()
+  @IsOptional()
+  metadata?: Record<string, any>;
 } 
