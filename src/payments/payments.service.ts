@@ -14,7 +14,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType, NotificationCategory } from '../notifications/schemas/notification.schema';
 import { EmailService } from '../email/email.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import { WithdrawalsService } from '../withdrawals/withdrawals.service';
+import { Withdrawal, WithdrawalDocument } from '../withdrawals/schemas/withdrawal.schema';
+import { WithdrawalStatus } from '../withdrawals/schemas/withdrawal.schema';
 
 interface FintavaVirtualWalletResponse {
   data: {
@@ -113,6 +114,7 @@ export class PaymentsService {
 
   constructor(
     @InjectModel(VirtualWallet.name) private virtualWalletModel: Model<VirtualWalletDocument>,
+    @InjectModel(Withdrawal.name) private withdrawalModel: Model<WithdrawalDocument>,
     private readonly configService: ConfigService,
     private readonly walletService: WalletService,
     private readonly transactionsService: TransactionsService,
@@ -120,7 +122,6 @@ export class PaymentsService {
     private readonly notificationsService: NotificationsService,
     private readonly emailService: EmailService,
     private readonly realtimeGateway: RealtimeGateway,
-    @Inject(forwardRef(() => WithdrawalsService)) private readonly withdrawalsService: WithdrawalsService,
   ) {
     const apiKey = this.configService.get<string>('FINTAVA_API_KEY');
     this.baseUrl = this.configService.get<string>('FINTAVA_BASE_URL', 'https://dev.fintavapay.com/api/dev');
@@ -406,7 +407,49 @@ export class PaymentsService {
     this.logger.log(`Received withdrawal webhook for reference: ${data.reference}, status: ${data.status}`);
     try {
       if (data.status === 'SUCCESS' || data.status === 'FAILED') {
-        await this.withdrawalsService.handlePayoutWebhook(data.reference, data.status, webhookData);
+        // Handle withdrawal webhook directly
+        const withdrawal = await this.withdrawalModel.findOne({ reference: data.reference });
+        if (!withdrawal) {
+          this.logger.error(`Withdrawal not found for webhook reference: ${data.reference}`);
+          return;
+        }
+
+        // Only update if not already completed/failed
+        if ([WithdrawalStatus.COMPLETED, WithdrawalStatus.FAILED, WithdrawalStatus.CANCELLED].includes(withdrawal.status)) {
+          this.logger.log(`Withdrawal ${data.reference} already in final state: ${withdrawal.status}`);
+          return;
+        }
+
+        withdrawal.webhookData = webhookData;
+        
+        if (data.status === 'SUCCESS') {
+          withdrawal.status = WithdrawalStatus.COMPLETED;
+          withdrawal.completedAt = new Date();
+          await this.transactionsService.update(withdrawal.transactionId.toString(), {
+            status: TransactionStatus.SUCCESS,
+            processedAt: new Date(),
+            externalReference: data.reference,
+          });
+        } else if (data.status === 'FAILED') {
+          withdrawal.status = WithdrawalStatus.FAILED;
+          withdrawal.failedAt = new Date();
+          withdrawal.failureReason = data.description || 'Payout failed';
+          await this.transactionsService.update(withdrawal.transactionId.toString(), {
+            status: TransactionStatus.FAILED,
+            processedAt: new Date(),
+            externalReference: data.reference,
+          });
+          // Refund the amount to user's wallet
+          await this.walletService.deposit(withdrawal.userId.toString(), {
+            walletType: WalletType.MAIN,
+            amount: withdrawal.amount,
+            currency: withdrawal.currency,
+            description: `Refund for failed withdrawal - ${withdrawal.reference}`,
+          });
+        }
+        
+        await withdrawal.save();
+        this.logger.log(`Successfully processed withdrawal webhook for reference: ${data.reference}`);
       }
     } catch (err) {
       this.logger.error(`Error handling withdrawal webhook for reference: ${data.reference}:`, err);

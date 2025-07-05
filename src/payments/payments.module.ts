@@ -9,11 +9,13 @@ import { TransactionsModule } from '../transactions/transactions.module';
 import { EmailModule } from '../email/email.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { Withdrawal, WithdrawalSchema } from '../withdrawals/schemas/withdrawal.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: VirtualWallet.name, schema: VirtualWalletSchema },
+      { name: Withdrawal.name, schema: WithdrawalSchema },
     ]),
     WalletModule,
     UsersModule,
