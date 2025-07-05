@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Withdrawal, WithdrawalDocument } from './schemas/withdrawal.schema';
@@ -9,6 +9,8 @@ import { UsersService } from '../users/users.service';
 import { WithdrawalStatus, WithdrawalMethod, WithdrawalPriority } from './schemas/withdrawal.schema';
 import { TransactionType, TransactionStatus } from '../transactions/schemas/transaction.schema';
 import { WalletType } from '../wallet/schemas/wallet.schema';
+import { AdminService } from '../admin/admin.service';
+import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
 export class WithdrawalsService {
@@ -17,10 +19,20 @@ export class WithdrawalsService {
     private readonly walletService: WalletService,
     private readonly transactionsService: TransactionsService,
     private readonly usersService: UsersService,
+    @Inject(forwardRef(() => AdminService)) private readonly adminService: AdminService,
+    private readonly paymentsService: PaymentsService,
   ) {}
 
   async createWithdrawal(userId: string, createWithdrawalDto: CreateWithdrawalDto) {
     const { amount, currency, notes } = createWithdrawalDto;
+
+    // Fetch withdrawal settings
+    const settings = await this.adminService.getWithdrawalSettings();
+    if (amount < settings.minWithdrawalAmount || amount > settings.maxWithdrawalAmount) {
+      throw new BadRequestException(
+        `Withdrawal amount must be between ₦${settings.minWithdrawalAmount} and ₦${settings.maxWithdrawalAmount}`
+      );
+    }
 
     // Check if user has sufficient balance
     const hasBalance = await this.walletService.checkBalance(userId, amount, currency);
@@ -34,8 +46,8 @@ export class WithdrawalsService {
       throw new BadRequestException('No active bank details found. Please add your bank details first.');
     }
 
-    // Calculate withdrawal fee
-    const fee = this.calculateWithdrawalFee(amount, currency);
+    // Calculate withdrawal fee using settings.withdrawalFee
+    const fee = amount * (settings.withdrawalFee / 100);
     const netAmount = amount - fee;
 
     // Generate unique reference
@@ -92,9 +104,27 @@ export class WithdrawalsService {
       description: `Withdrawal - ${reference}`,
     });
 
+    // Check auto payout setting and process accordingly
+    const autoPayout = settings.autoPayout || false;
+    
+    if (autoPayout) {
+      // Auto payout: Call FintavaPay API immediately
+      try {
+        await this.processPayout(savedWithdrawal);
+      } catch (error) {
+        // If payout fails, keep withdrawal as pending for manual processing
+        console.error('Auto payout failed:', error);
+        // Update withdrawal status to indicate auto payout failed
+        savedWithdrawal.status = WithdrawalStatus.PENDING;
+        savedWithdrawal.autoPayoutFailed = true;
+        savedWithdrawal.autoPayoutError = error.message;
+        await savedWithdrawal.save();
+      }
+    }
+
     return {
       success: true,
-      message: 'Withdrawal request created successfully',
+      message: autoPayout ? 'Withdrawal request created and payout initiated' : 'Withdrawal request created successfully',
       data: {
         withdrawalId: savedWithdrawal._id,
         reference: savedWithdrawal.reference,
@@ -108,27 +138,223 @@ export class WithdrawalsService {
           accountNumber: savedWithdrawal.bankDetails.accountNumber,
           accountName: savedWithdrawal.bankDetails.accountName,
         } : null,
-        estimatedProcessingTime: '24-48 hours',
+        estimatedProcessingTime: autoPayout ? '2-4 hours' : '24-48 hours',
         createdAt: savedWithdrawal.createdAt,
       },
     };
   }
 
-  private calculateWithdrawalFee(amount: number, currency: string): number {
-    // Different fee structures for different currencies
-    switch (currency) {
-      case 'naira':
-        return Math.max(100, amount * 0.01); // 1% fee, minimum ₦100
-      case 'usdt':
-        return Math.max(1, amount * 0.02); // 2% fee, minimum $1
-      default:
-        return 0;
+  /**
+   * Process payout for a withdrawal via FintavaPay
+   */
+  async processPayout(withdrawal: WithdrawalDocument) {
+    try {
+      if (!withdrawal.bankDetails) {
+        throw new BadRequestException('Bank details not found for withdrawal');
+      }
+
+      const payoutResponse = await this.paymentsService.merchantTransfer({
+        amount: withdrawal.netAmount,
+        sortCode: withdrawal.bankDetails.sortCode,
+        accountNumber: withdrawal.bankDetails.accountNumber,
+        accountName: withdrawal.bankDetails.accountName,
+        narration: `Withdrawal payout - ${withdrawal.reference}`,
+        customerReference: withdrawal.reference,
+        currency: withdrawal.currency === 'naira' ? 'NGN' : withdrawal.currency.toUpperCase(),
+        metadata: {
+          withdrawalId: withdrawal._id.toString(),
+          userId: withdrawal.userId.toString(),
+          originalAmount: withdrawal.amount,
+          fee: withdrawal.fee,
+        },
+      });
+
+      // Update withdrawal status to processing
+      withdrawal.status = WithdrawalStatus.PROCESSING;
+      withdrawal.payoutInitiatedAt = new Date();
+      withdrawal.payoutReference = payoutResponse.data?.reference || withdrawal.reference;
+      withdrawal.payoutResponse = payoutResponse;
+      await withdrawal.save();
+
+      // Update transaction status
+      await this.transactionsService.update(withdrawal.transactionId.toString(), {
+        status: TransactionStatus.PROCESSING,
+        externalReference: payoutResponse.data?.reference || withdrawal.reference,
+      });
+
+      return payoutResponse;
+    } catch (error) {
+      throw new BadRequestException(`Payout processing failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Admin method to trigger payout for a pending withdrawal
+   */
+  async triggerPayout(withdrawalId: string) {
+    const withdrawal = await this.withdrawalModel.findById(withdrawalId);
+    if (!withdrawal) {
+      throw new NotFoundException('Withdrawal not found');
+    }
+
+    if (withdrawal.status !== WithdrawalStatus.PENDING) {
+      throw new BadRequestException('Only pending withdrawals can be processed');
+    }
+
+    return await this.processPayout(withdrawal);
+  }
+
+  /**
+   * Find withdrawal by reference
+   */
+  async findWithdrawalByReference(reference: string) {
+    return await this.withdrawalModel.findOne({ reference });
   }
 
   private generateReference(): string {
     const timestamp = Date.now().toString();
     const random = Math.random().toString(36).substring(2, 8).toUpperCase();
     return `WTH${timestamp}${random}`;
+  }
+
+  async getUserWithdrawals(userId: string) {
+    const withdrawals = await this.withdrawalModel
+      .find({ userId: new Types.ObjectId(userId) })
+      .sort({ createdAt: -1 });
+
+    return {
+      success: true,
+      data: withdrawals,
+    };
+  }
+
+  async getUserWithdrawal(userId: string, withdrawalId: string) {
+    const withdrawal = await this.withdrawalModel.findOne({
+      _id: withdrawalId,
+      userId: new Types.ObjectId(userId),
+    });
+
+    if (!withdrawal) {
+      throw new NotFoundException('Withdrawal not found');
+    }
+
+    return {
+      success: true,
+      data: withdrawal,
+    };
+  }
+
+  async cancelWithdrawal(userId: string, withdrawalId: string) {
+    const withdrawal = await this.withdrawalModel.findOne({
+      _id: withdrawalId,
+      userId: new Types.ObjectId(userId),
+    });
+
+    if (!withdrawal) {
+      throw new NotFoundException('Withdrawal not found');
+    }
+
+    if (!withdrawal.canBeCancelled) {
+      throw new BadRequestException('This withdrawal cannot be cancelled');
+    }
+
+    // Update withdrawal status
+    withdrawal.status = WithdrawalStatus.CANCELLED;
+    withdrawal.cancelledAt = new Date();
+    withdrawal.cancelledBy = new Types.ObjectId(userId);
+    withdrawal.cancellationReason = 'Cancelled by user';
+
+    await withdrawal.save();
+
+    // Refund the amount to user's wallet
+    await this.walletService.deposit(userId, {
+      walletType: WalletType.MAIN,
+      amount: withdrawal.amount,
+      currency: withdrawal.currency,
+      description: `Refund for cancelled withdrawal - ${withdrawal.reference}`,
+    });
+
+    // Update transaction status
+    await this.transactionsService.update(withdrawal.transactionId.toString(), { status: TransactionStatus.CANCELLED });
+
+    return {
+      success: true,
+      message: 'Withdrawal cancelled successfully',
+      data: {
+        withdrawalId: withdrawal._id,
+        reference: withdrawal.reference,
+        status: withdrawal.status,
+        refundedAmount: withdrawal.amount,
+        currency: withdrawal.currency,
+      },
+    };
+  }
+
+  async bulkTriggerPayout(withdrawalIds: string[]): Promise<{ processed: string[]; failed: { id: string; error: string }[] }> {
+    const processed: string[] = [];
+    const failed: { id: string; error: string }[] = [];
+
+    for (const id of withdrawalIds) {
+      try {
+        const withdrawal = await this.withdrawalModel.findById(id);
+        if (!withdrawal) throw new Error('Not found');
+        if (![WithdrawalStatus.PENDING, WithdrawalStatus.PROCESSING].includes(withdrawal.status)) {
+          throw new Error('Not pending or processing');
+        }
+        await this.processPayout(withdrawal);
+        processed.push(id);
+      } catch (error: any) {
+        failed.push({ id, error: error.message });
+      }
+    }
+    return { processed, failed };
+  }
+
+  async getPendingOrProcessingWithdrawalIds(): Promise<string[]> {
+    const withdrawals = await this.withdrawalModel.find({
+      status: { $in: [WithdrawalStatus.PENDING, WithdrawalStatus.PROCESSING] }
+    }).select('_id');
+    return withdrawals.map(w => w._id.toString());
+  }
+
+  /**
+   * Handle payout webhook from payment provider (FintavaPay)
+   */
+  async handlePayoutWebhook(reference: string, status: string, webhookData: any) {
+    const withdrawal = await this.withdrawalModel.findOne({ reference });
+    if (!withdrawal) {
+      throw new NotFoundException('Withdrawal not found for webhook');
+    }
+    // Only update if not already completed/failed
+    if ([WithdrawalStatus.COMPLETED, WithdrawalStatus.FAILED, WithdrawalStatus.CANCELLED].includes(withdrawal.status)) {
+      return;
+    }
+    withdrawal.webhookData = webhookData;
+    if (status === 'SUCCESS') {
+      withdrawal.status = WithdrawalStatus.COMPLETED;
+      withdrawal.completedAt = new Date();
+      await this.transactionsService.update(withdrawal.transactionId.toString(), {
+        status: TransactionStatus.SUCCESS,
+        processedAt: new Date(),
+        externalReference: webhookData.data.reference,
+      });
+    } else if (status === 'FAILED') {
+      withdrawal.status = WithdrawalStatus.FAILED;
+      withdrawal.failedAt = new Date();
+      withdrawal.failureReason = webhookData.data.description || 'Payout failed';
+      await this.transactionsService.update(withdrawal.transactionId.toString(), {
+        status: TransactionStatus.FAILED,
+        processedAt: new Date(),
+        externalReference: webhookData.data.reference,
+      });
+      // Refund the amount to user's wallet
+      await this.walletService.deposit(withdrawal.userId.toString(), {
+        walletType: WalletType.MAIN,
+        amount: withdrawal.amount,
+        currency: withdrawal.currency,
+        description: `Refund for failed withdrawal - ${withdrawal.reference}`,
+      });
+    }
+    await withdrawal.save();
   }
 } 

@@ -109,6 +109,8 @@ async function bootstrap() {
       logger.log('Auto-seeding enabled. Checking and seeding database...');
       const seedsService = app.get(SeedsService);
       await seedsService.seedInvestmentPlans();
+      await seedsService.seedAdminUser();
+      await seedsService.seedDefaultSettings();
       logger.log('Startup seeding completed successfully');
     } catch (error) {
       logger.error('Startup seeding failed:', error);

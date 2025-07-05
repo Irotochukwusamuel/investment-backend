@@ -56,5 +56,4 @@ export class ConfirmationCode {
 export const ConfirmationCodeSchema = SchemaFactory.createForClass(ConfirmationCode);
 
 // Create compound index for efficient querying
-ConfirmationCodeSchema.index({ identifier: 1, type: 1, isUsed: 1 });
-ConfirmationCodeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); 
+ConfirmationCodeSchema.index({ identifier: 1, type: 1, isUsed: 1 }); 

@@ -30,7 +30,7 @@ export class User {
   isPhoneVerified: boolean;
 
   @Prop({ type: String, enum: Role, default: Role.USER })
-  role: Role;
+  role: Role; // Use role === 'admin' for admin access
 
   @Prop({ default: true })
   isActive: boolean;
@@ -97,12 +97,10 @@ export class User {
 
 export const UserSchema = SchemaFactory.createForClass(User);
 
-// Indexes
-UserSchema.index({ email: 1 });
+// Indexes (removing duplicates for fields with unique: true)
 UserSchema.index({ phoneNumber: 1 });
 UserSchema.index({ emailVerificationToken: 1 });
 UserSchema.index({ passwordResetToken: 1 });
-UserSchema.index({ referralCode: 1 });
 UserSchema.index({ referredBy: 1 });
 
 // Virtual for full name

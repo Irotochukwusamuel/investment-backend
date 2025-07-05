@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { InvestmentPlan, InvestmentPlanDocument, InvestmentPlanStatus } from '../investment-plans/schemas/investment-plan.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
+import { Settings } from '../schemas/settings.schema';
 import { Role } from '../users/enums/role.enum';
 import * as bcrypt from 'bcrypt';
 
@@ -13,6 +14,7 @@ export class SeedsService {
   constructor(
     @InjectModel(InvestmentPlan.name) private planModel: Model<InvestmentPlanDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(Settings.name) private settingsModel: Model<any>,
   ) {}
 
   async seedAll() {
@@ -21,6 +23,7 @@ export class SeedsService {
     try {
       await this.seedInvestmentPlans();
       await this.seedAdminUser();
+      await this.seedDefaultSettings();
       
       this.logger.log('Database seeding completed successfully!');
     } catch (error) {
@@ -270,6 +273,40 @@ export class SeedsService {
       }
     } catch (error) {
       this.logger.error('Failed to create admin user:', error);
+    }
+  }
+
+  async seedDefaultSettings() {
+    this.logger.log('Seeding default platform and withdrawal settings...');
+    // Platform settings
+    const platform = await this.settingsModel.findOne({ key: 'platform' });
+    if (!platform) {
+      await this.settingsModel.create({
+        key: 'platform',
+        value: {
+          withdrawalLimits: { minAmount: 100, maxAmount: 1000000 },
+          fees: { withdrawalFee: 2.5, depositFee: 0, transactionFee: 1.0 },
+          security: { requireEmailVerification: true, requirePhoneVerification: false, twoFactorAuth: false, sessionTimeout: 24 },
+          notifications: { emailNotifications: true, smsNotifications: false, pushNotifications: true },
+          maintenance: { maintenanceMode: false, maintenanceMessage: '' },
+          autoPayout: false,
+        }
+      });
+      this.logger.log('Seeded default platform settings.');
+    }
+    // Withdrawal settings
+    const withdrawal = await this.settingsModel.findOne({ key: 'withdrawal' });
+    if (!withdrawal) {
+      await this.settingsModel.create({
+        key: 'withdrawal',
+        value: {
+          minWithdrawalAmount: 100,
+          maxWithdrawalAmount: 1000000,
+          withdrawalFee: 2.5,
+          processingTime: 24,
+        }
+      });
+      this.logger.log('Seeded default withdrawal settings.');
     }
   }
 

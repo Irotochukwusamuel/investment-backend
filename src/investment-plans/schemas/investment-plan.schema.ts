@@ -130,7 +130,6 @@ InvestmentPlanSchema.index({ status: 1, priority: -1 });
 InvestmentPlanSchema.index({ minAmount: 1, maxAmount: 1 });
 InvestmentPlanSchema.index({ dailyRoi: -1 });
 InvestmentPlanSchema.index({ popularity: -1 });
-InvestmentPlanSchema.index({ name: 1 });
 
 // Virtual for formatted daily ROI
 InvestmentPlanSchema.virtual('dailyRoiFormatted').get(function() {

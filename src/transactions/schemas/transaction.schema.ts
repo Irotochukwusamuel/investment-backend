@@ -6,6 +6,7 @@ export type TransactionDocument = Transaction & Document;
 
 export enum TransactionStatus {
   PENDING = 'pending',
+  PROCESSING = 'processing',
   SUCCESS = 'success',
   FAILED = 'failed',
   CANCELLED = 'cancelled',

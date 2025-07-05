@@ -102,6 +102,34 @@ export class Withdrawal {
   @Prop({ default: null })
   autoDisburseFailureReason?: string;
 
+  @ApiProperty({ description: 'Auto payout failed flag' })
+  @Prop({ default: false })
+  autoPayoutFailed?: boolean;
+
+  @ApiProperty({ description: 'Auto payout error message' })
+  @Prop({ default: null })
+  autoPayoutError?: string;
+
+  @ApiProperty({ description: 'Payout initiated timestamp' })
+  @Prop({ default: null })
+  payoutInitiatedAt?: Date;
+
+  @ApiProperty({ description: 'Payout reference from payment provider' })
+  @Prop({ default: null })
+  payoutReference?: string;
+
+  @ApiProperty({ description: 'Payout response from payment provider' })
+  @Prop({ type: Object, default: null })
+  payoutResponse?: any;
+
+  @ApiProperty({ description: 'Webhook data from payment provider' })
+  @Prop({ type: Object, default: null })
+  webhookData?: any;
+
+  @ApiProperty({ description: 'Completed timestamp' })
+  @Prop({ default: null })
+  completedAt?: Date;
+
   @ApiProperty({ description: 'Requires manual approval' })
   @Prop({ default: false })
   requiresManualApproval: boolean;
@@ -256,10 +284,9 @@ export class Withdrawal {
 
 export const WithdrawalSchema = SchemaFactory.createForClass(Withdrawal);
 
-// Add indexes for efficient querying
+// Indexes
 WithdrawalSchema.index({ userId: 1, status: 1 });
 WithdrawalSchema.index({ status: 1, priority: -1, createdAt: 1 });
-WithdrawalSchema.index({ reference: 1 });
 WithdrawalSchema.index({ transactionId: 1 });
 WithdrawalSchema.index({ isAutoDisburseEligible: 1, autoDisburseAttempted: 1 });
 WithdrawalSchema.index({ nextRetryAt: 1 });

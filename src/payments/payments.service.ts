@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException, InternalServerErrorException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
@@ -14,6 +14,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType, NotificationCategory } from '../notifications/schemas/notification.schema';
 import { EmailService } from '../email/email.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { WithdrawalsService } from '../withdrawals/withdrawals.service';
 
 interface FintavaVirtualWalletResponse {
   data: {
@@ -82,6 +83,27 @@ interface FintavaAccountDetailsResponse {
   };
 }
 
+interface FintavaPayoutWebhookData {
+  event: string;
+  data: {
+    amount: number;
+    vat: number;
+    reference: string;
+    customerId: string;
+    availableBalance: number;
+    bookedBalance: number;
+    status: string;
+    total: number;
+    description: string;
+    destination: string;
+    sessionID: string;
+    CustomerReference: string;
+    senderName: string;
+    senderAccountNumber: string;
+    charges: number;
+  };
+}
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -98,6 +120,7 @@ export class PaymentsService {
     private readonly notificationsService: NotificationsService,
     private readonly emailService: EmailService,
     private readonly realtimeGateway: RealtimeGateway,
+    @Inject(forwardRef(() => WithdrawalsService)) private readonly withdrawalsService: WithdrawalsService,
   ) {
     const apiKey = this.configService.get<string>('FINTAVA_API_KEY');
     this.baseUrl = this.configService.get<string>('FINTAVA_BASE_URL', 'https://dev.fintavapay.com/api/dev');
@@ -264,105 +287,129 @@ export class PaymentsService {
     }
   }
 
-  async handleWebhook(webhookData: FintavaWebhookData): Promise<void> {
+  async handleWebhook(webhookData: FintavaWebhookData | FintavaPayoutWebhookData): Promise<void> {
     try {
       this.logger.debug('Processing FINTAVA webhook:', webhookData);
 
-      if (webhookData.event !== 'VIRTUAL_WALLET_PAYMENT') {
-        this.logger.warn(`Unhandled webhook event: ${webhookData.event}`);
-        return;
+      const { event } = webhookData;
+
+      switch (event) {
+        case 'VIRTUAL_WALLET_PAYMENT':
+          await this.handleDepositWebhook(webhookData as FintavaWebhookData);
+          break;
+        case 'customer_bank_transfer':
+          await this.handleWithdrawalWebhook(webhookData as FintavaPayoutWebhookData);
+          break;
+        default:
+          this.logger.warn(`Unhandled webhook event: ${event}`);
+          return;
       }
-
-      const { data } = webhookData;
-
-      // Find virtual wallet by merchant reference
-      const virtualWallet = await this.virtualWalletModel.findOne({
-        merchantReference: data.merchantReference,
-      });
-
-      if (!virtualWallet) {
-        this.logger.error(`Virtual wallet not found for reference: ${data.merchantReference}`);
-        throw new NotFoundException('Virtual wallet not found');
-      }
-
-      // Check if payment is already processed
-      if (virtualWallet.status === VirtualWalletStatus.PAID) {
-        this.logger.warn(`Payment already processed for reference: ${data.merchantReference}`);
-        return;
-      }
-
-      // Update virtual wallet status
-      virtualWallet.status = VirtualWalletStatus.PAID;
-      virtualWallet.paymentStatus = data.paymentStatus;
-      virtualWallet.paymentTime = new Date();
-      virtualWallet.webhookData = data;
-      await virtualWallet.save();
-
-      // Update transaction status
-      await this.transactionsService.updateByReference(data.merchantReference, {
-        status: TransactionStatus.SUCCESS,
-        processedAt: new Date(),
-        externalReference: data.id,
-      });
-
-      // Credit user wallet
-      await this.walletService.deposit(virtualWallet.userId.toString(), {
-        walletType: WalletType.MAIN,
-        amount: parseFloat(data.amount),
-        currency: 'naira',
-        description: data.description,
-        paymentReference: data.merchantReference,
-      });
-
-      // Get user details for notifications
-      const user = await this.usersService.findById(virtualWallet.userId.toString());
-      
-      if (user) {
-        // Create success notification
-        await this.notificationsService.createTransactionNotification(
-          virtualWallet.userId.toString(),
-          'Deposit Successful',
-          `Your deposit of ₦${parseFloat(data.amount).toLocaleString()} has been processed successfully and credited to your wallet.`,
-          NotificationType.SUCCESS
-        );
-
-        // Send deposit confirmation email
-        try {
-          await this.emailService.sendDepositConfirmedEmail(
-            user.email,
-            user.firstName || user.email,
-            {
-              amount: parseFloat(data.amount),
-              currency: 'naira',
-              paymentMethod: 'Bank Transfer (FINTAVA)',
-              reference: data.merchantReference,
-              confirmationDate: new Date(),
-              transactionHash: data.id,
-            }
-          );
-        } catch (emailError) {
-          this.logger.error('Failed to send deposit confirmation email:', emailError);
-        }
-      }
-
-      // Emit real-time event to user
-      this.realtimeGateway.emitToUser(
-        virtualWallet.userId.toString(),
-        'wallet:depositConfirmed',
-        {
-          amount: parseFloat(data.amount),
-          currency: 'naira',
-          reference: data.merchantReference,
-          description: data.description,
-          paymentMethod: 'Bank Transfer (FINTAVA)',
-          time: new Date(),
-        }
-      );
-
-      this.logger.log(`Successfully processed payment for reference: ${data.merchantReference}`);
     } catch (error) {
       this.logger.error('Error processing webhook:', error);
       throw error;
+    }
+  }
+
+  private async handleDepositWebhook(webhookData: FintavaWebhookData): Promise<void> {
+    const { data } = webhookData;
+
+    // Find virtual wallet by merchant reference
+    const virtualWallet = await this.virtualWalletModel.findOne({
+      merchantReference: data.merchantReference,
+    });
+
+    if (!virtualWallet) {
+      this.logger.error(`Virtual wallet not found for reference: ${data.merchantReference}`);
+      throw new NotFoundException('Virtual wallet not found');
+    }
+
+    // Check if payment is already processed
+    if (virtualWallet.status === VirtualWalletStatus.PAID) {
+      this.logger.warn(`Payment already processed for reference: ${data.merchantReference}`);
+      return;
+    }
+
+    // Update virtual wallet status
+    virtualWallet.status = VirtualWalletStatus.PAID;
+    virtualWallet.paymentStatus = data.paymentStatus;
+    virtualWallet.paymentTime = new Date();
+    virtualWallet.webhookData = data;
+    await virtualWallet.save();
+
+    // Update transaction status
+    await this.transactionsService.updateByReference(data.merchantReference, {
+      status: TransactionStatus.SUCCESS,
+      processedAt: new Date(),
+      externalReference: data.id,
+    });
+
+    // Credit user wallet
+    await this.walletService.deposit(virtualWallet.userId.toString(), {
+      walletType: WalletType.MAIN,
+      amount: parseFloat(data.amount),
+      currency: 'naira',
+      description: data.description,
+      paymentReference: data.merchantReference,
+    });
+
+    // Get user details for notifications
+    const user = await this.usersService.findById(virtualWallet.userId.toString());
+    
+    if (user) {
+      // Create success notification
+      await this.notificationsService.createTransactionNotification(
+        virtualWallet.userId.toString(),
+        'Deposit Successful',
+        `Your deposit of ₦${parseFloat(data.amount).toLocaleString()} has been processed successfully and credited to your wallet.`,
+        NotificationType.SUCCESS
+      );
+
+      // Send deposit confirmation email
+      try {
+        await this.emailService.sendDepositConfirmedEmail(
+          user.email,
+          user.firstName || user.email,
+          {
+            amount: parseFloat(data.amount),
+            currency: 'naira',
+            paymentMethod: 'Bank Transfer (FINTAVA)',
+            reference: data.merchantReference,
+            confirmationDate: new Date(),
+            transactionHash: data.id,
+          }
+        );
+      } catch (emailError) {
+        this.logger.error('Failed to send deposit confirmation email:', emailError);
+      }
+    }
+
+    // Emit real-time event to user
+    this.realtimeGateway.emitToUser(
+      virtualWallet.userId.toString(),
+      'wallet:depositConfirmed',
+      {
+        amount: parseFloat(data.amount),
+        currency: 'naira',
+        reference: data.merchantReference,
+        description: data.description,
+        paymentMethod: 'Bank Transfer (FINTAVA)',
+        time: new Date(),
+      }
+    );
+
+    this.logger.log(`Successfully processed deposit for reference: ${data.merchantReference}`);
+  }
+
+  private async handleWithdrawalWebhook(webhookData: FintavaPayoutWebhookData): Promise<void> {
+    const { data } = webhookData;
+
+    this.logger.log(`Received withdrawal webhook for reference: ${data.reference}, status: ${data.status}`);
+    try {
+      if (data.status === 'SUCCESS' || data.status === 'FAILED') {
+        await this.withdrawalsService.handlePayoutWebhook(data.reference, data.status, webhookData);
+      }
+    } catch (err) {
+      this.logger.error(`Error handling withdrawal webhook for reference: ${data.reference}:`, err);
     }
   }
 
@@ -537,6 +584,60 @@ export class PaymentsService {
       }
       
       throw new InternalServerErrorException('Failed to verify account details');
+    }
+  }
+
+  /**
+   * Initiate a merchant transfer (payout) to a user's bank account via FintavaPay
+   */
+  async merchantTransfer({
+    amount,
+    sortCode,
+    accountNumber,
+    accountName,
+    narration,
+    customerReference,
+    currency = 'NGN',
+    metadata = {},
+  }: {
+    amount: number;
+    sortCode: string;
+    accountNumber: string;
+    accountName: string;
+    narration: string;
+    customerReference: string;
+    currency?: string;
+    metadata?: Record<string, any>;
+  }) {
+    try {
+      const payload = {
+        narration,
+        accountNumber,
+        accountName,
+        sortCode,
+        amount,
+        CustomerReference: customerReference,
+        ...metadata,
+      };
+      
+      this.logger.debug('Initiating FintavaPay merchant transfer with payload:', payload);
+      
+      const response = await this.fintavaClient.post('/bank/credit/merchant', payload);
+      
+      if (response.data.status !== 200 && response.data.status !== 'SUCCESS') {
+        throw new BadRequestException(`FintavaPay payout error: ${response.data.message}`);
+      }
+      
+      this.logger.log(`FintavaPay payout initiated: ${customerReference}`);
+      return response.data;
+    } catch (error) {
+      this.logger.error('FintavaPay payout error:', error.response?.data || error.message);
+      
+      if (error.response?.data) {
+        throw new BadRequestException(`FintavaPay payout error: ${error.response.data.message || 'Unknown error'}`);
+      }
+      
+      throw new InternalServerErrorException('Failed to initiate payout');
     }
   }
 } 
