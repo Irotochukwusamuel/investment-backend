@@ -295,8 +295,15 @@ export class AdminService {
 
     const total = await this.investmentModel.countDocuments(filter);
 
+    // Map to return user and plan fields
+    const mappedInvestments = investments.map(inv => ({
+      ...inv.toObject(),
+      user: inv.userId,
+      plan: inv.planId,
+    }));
+
     return {
-      investments,
+      investments: mappedInvestments,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -364,8 +371,14 @@ export class AdminService {
 
     const total = await this.withdrawalModel.countDocuments(filter);
 
+    // Map to return user field
+    const mappedWithdrawals = withdrawals.map(w => ({
+      ...w.toObject(),
+      user: w.userId,
+    }));
+
     return {
-      withdrawals,
+      withdrawals: mappedWithdrawals,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -430,8 +443,14 @@ export class AdminService {
 
     const total = await this.walletModel.countDocuments(filter);
 
+    // Map to return user field
+    const mappedWallets = wallets.map(w => ({
+      ...w.toObject(),
+      user: w.userId,
+    }));
+
     return {
-      wallets,
+      wallets: mappedWallets,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
