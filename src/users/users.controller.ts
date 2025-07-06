@@ -179,4 +179,24 @@ export class UsersController {
   ): Promise<void> {
     return this.usersService.resetPassword(body.token, body.newPassword);
   }
+
+  @Get('referrals')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current user referrals' })
+  @ApiResponse({ status: 200, description: 'User referrals retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getMyReferrals(@Request() req: any) {
+    return this.usersService.getMyReferrals(req.user.id);
+  }
+
+  @Get('referrals/verify')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Verify referral storage for current user' })
+  @ApiResponse({ status: 200, description: 'Referral storage verification completed' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async verifyReferralStorage(@Request() req: any) {
+    return this.usersService.verifyReferralStorage(req.user.id);
+  }
 } 

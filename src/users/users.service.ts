@@ -1,13 +1,15 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User, UserDocument } from './schemas/user.schema';
 import { BankDetails, BankDetailsDocument } from './schemas/bank-details.schema';
+import { Investment, InvestmentDocument } from '../investments/schemas/investment.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateBankDetailsDto, UpdateBankDetailsDto } from './dto/bank-details.dto';
 import { EmailService } from '../email/email.service';
 import { WalletService } from '../wallet/wallet.service';
+import { ReferralsService } from '../referrals/referrals.service';
 import * as bcrypt from 'bcrypt';
 import { Role } from './enums/role.enum';
 
@@ -16,8 +18,11 @@ export class UsersService {
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(BankDetails.name) private bankDetailsModel: Model<BankDetailsDocument>,
+    @InjectModel(Investment.name) private investmentModel: Model<InvestmentDocument>,
     private readonly emailService: EmailService,
     private readonly walletService: WalletService,
+    @Inject(forwardRef(() => ReferralsService))
+    private readonly referralsService: ReferralsService,
   ) {}
 
   // Generate unique referral code
@@ -177,6 +182,23 @@ export class UsersService {
 
     // Automatically create default wallets for new users
     await this.walletService.createDefaultWallets(savedUser._id.toString());
+
+    // Create referral relationship if referral code was provided
+    if (referredBy) {
+      try {
+        await this.referralsService.create({
+          referrerId: referredBy.toString(),
+          referredUserId: savedUser._id.toString(),
+          referralCode: referralCode!,
+          status: 'pending',
+          isActive: false
+        });
+        console.log(`✅ Referral created for user ${savedUser.email}`);
+      } catch (error) {
+        console.error('Failed to create referral:', error);
+        // Don't fail user creation if referral creation fails
+      }
+    }
 
     return savedUser;
   }
@@ -528,5 +550,84 @@ export class UsersService {
       userId: new Types.ObjectId(userId),
       isActive: true,
     }).exec();
+  }
+
+  async getMyReferrals(userId: string) {
+    console.log(`🔍 Fetching referrals for user: ${userId}`);
+    
+    const referrals = await this.userModel.find({
+      referredBy: new Types.ObjectId(userId)
+    }).select('firstName lastName email isActive createdAt lastLoginAt totalInvested totalEarnings').exec();
+
+    console.log(`📊 Found ${referrals.length} referrals for user ${userId}`);
+
+    // Calculate additional stats for each referral
+    const referralsWithStats = await Promise.all(
+      referrals.map(async (referral) => {
+        // Get active investments count
+        const activeInvestments = await this.investmentModel.countDocuments({
+          userId: referral._id,
+          status: 'active'
+        });
+
+        // Calculate total earnings from investments
+        const totalEarnings = await this.investmentModel.aggregate([
+          { $match: { userId: referral._id } },
+          { $group: { _id: null, total: { $sum: '$earnedAmount' } } }
+        ]).then(result => result[0]?.total || 0);
+
+        console.log(`📈 Referral ${referral.email}: ${activeInvestments} active investments, ₦${totalEarnings} total earnings`);
+
+        return {
+          id: referral._id,
+          firstName: referral.firstName,
+          lastName: referral.lastName,
+          email: referral.email,
+          isActive: referral.isActive,
+          totalEarnings: totalEarnings,
+          totalInvestments: activeInvestments,
+          createdAt: (referral as any).createdAt || new Date(),
+          lastLoginAt: referral.lastLoginAt
+        };
+      })
+    );
+
+    const result = {
+      success: true,
+      data: referralsWithStats,
+      total: referralsWithStats.length
+    };
+
+    console.log(`✅ Returning ${result.total} referrals with complete statistics`);
+    return result;
+  }
+
+  // Method to verify referral data storage
+  async verifyReferralStorage(userId: string): Promise<{
+    hasReferralCode: boolean;
+    referralCode: string | null;
+    referredBy: string | null;
+    referralCount: number;
+    totalReferralEarnings: number;
+    referredUsers: number;
+  }> {
+    const user = await this.userModel.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Count users referred by this user
+    const referredUsersCount = await this.userModel.countDocuments({
+      referredBy: new Types.ObjectId(userId)
+    });
+
+    return {
+      hasReferralCode: !!user.referralCode,
+      referralCode: user.referralCode || null,
+      referredBy: user.referredBy?.toString() || null,
+      referralCount: user.referralCount,
+      totalReferralEarnings: user.totalReferralEarnings,
+      referredUsers: referredUsersCount
+    };
   }
 } 

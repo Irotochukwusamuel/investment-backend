@@ -54,7 +54,7 @@ export class AdminService {
       this.investmentModel.countDocuments(),
       this.withdrawalModel.countDocuments(),
       this.planModel.countDocuments(),
-      this.userModel.countDocuments({ isActive: true }),
+      this.userModel.countDocuments({ status: true }),
       this.investmentModel.countDocuments({ status: 'active' }),
       this.withdrawalModel.countDocuments({ status: 'pending' }),
     ]);
@@ -146,24 +146,32 @@ export class AdminService {
   }
 
   async getUsersStats() {
-    const [totalUsers, activeUsers, bannedUsers, suspendedUsers, totalAdmins, newUsersThisMonth, verifiedUsers, unverifiedUsers] = await Promise.all([
+    const [totalUsers, activeUsers, inactiveUsers, totalAdmins, newUsersThisMonth, verifiedUsers, unverifiedUsers] = await Promise.all([
       this.userModel.countDocuments(),
       this.userModel.countDocuments({ isActive: true }),
       this.userModel.countDocuments({ isActive: false }),
-      this.userModel.countDocuments({ isActive: false }),
       this.userModel.countDocuments({ role: 'admin' }),
       this.userModel.countDocuments({
-        createdAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
+        createdAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) }
       }),
-      this.userModel.countDocuments({ $and: [{ isEmailVerified: true }, { isPhoneVerified: true }] }),
-      this.userModel.countDocuments({ $or: [{ isEmailVerified: false }, { isPhoneVerified: false }] }),
+      this.userModel.countDocuments({
+        $and: [
+          { isEmailVerified: true },
+          { isPhoneVerified: true }
+        ]
+      }),
+      this.userModel.countDocuments({
+        $or: [
+          { isEmailVerified: false },
+          { isPhoneVerified: false }
+        ]
+      }),
     ]);
 
     return {
       totalUsers,
       activeUsers,
-      bannedUsers,
-      suspendedUsers,
+      inactiveUsers,
       totalAdmins,
       newUsersThisMonth,
       verifiedUsers,
@@ -552,7 +560,7 @@ export class AdminService {
 
   // Investment Plans Management
   async getAllPlans(query: any) {
-    const { status, currency, search } = query;
+    const { status, currency, search, page = 1, limit = 10 } = query;
     const filter: any = {};
 
     if (status && status !== 'all') {
@@ -568,8 +576,24 @@ export class AdminService {
       ];
     }
 
-    const plans = await this.planModel.find(filter).sort({ priority: -1, createdAt: -1 });
-    return plans;
+    const skip = (page - 1) * limit;
+    const plans = await this.planModel
+      .find(filter)
+      .skip(skip)
+      .limit(parseInt(limit))
+      .sort({ priority: -1, createdAt: -1 });
+
+    const total = await this.planModel.countDocuments(filter);
+
+    return {
+      plans,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
   }
 
   async getPlansStats() {
@@ -743,7 +767,7 @@ export class AdminService {
     if (!plan) {
       throw new NotFoundException('Investment plan not found');
     }
-    return { message: 'Investment plan deleted successfully' };
+    return plan;
   }
 
   // Update plan performance metrics
@@ -768,8 +792,9 @@ export class AdminService {
 
   // ROI Management
   async getRoiSettings() {
-    const plans = await this.planModel.find().select('_id name dailyRoi totalRoi duration currency isActive');
-    return plans.map(plan => ({
+    const plans = await this.planModel.find().select('_id name dailyRoi totalRoi duration currency status');
+    
+    const roiSettings = plans.map(plan => ({
       _id: plan._id,
       planId: plan._id,
       planName: plan.name,
@@ -779,6 +804,43 @@ export class AdminService {
       currency: plan.currency,
       isActive: plan.status === 'active',
     }));
+
+    return roiSettings;
+  }
+
+  async getRoiSettingsPaginated(query: any) {
+    const { page = 1, limit = 10 } = query;
+    const skip = (page - 1) * limit;
+    
+    const plans = await this.planModel
+      .find()
+      .select('_id name dailyRoi totalRoi duration currency status')
+      .skip(skip)
+      .limit(parseInt(limit))
+      .sort({ createdAt: -1 });
+    
+    const total = await this.planModel.countDocuments();
+
+    const roiSettings = plans.map(plan => ({
+      _id: plan._id,
+      planId: plan._id,
+      planName: plan.name,
+      dailyRoi: plan.dailyRoi,
+      totalRoi: plan.totalRoi,
+      duration: plan.duration,
+      currency: plan.currency,
+      isActive: plan.status === 'active',
+    }));
+
+    return {
+      roiSettings,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
   }
 
   async getRoiStats() {
@@ -888,37 +950,36 @@ export class AdminService {
 
   // Bulk operations
   async bulkAction(userIds: string[], action: string, reason?: string) {
-    const updateData: any = {};
-    
+    const updateData: any = {
+      updatedAt: new Date(),
+    };
+
     switch (action) {
       case 'activate':
         updateData.isActive = true;
-        updateData.status = 'active';
         break;
-      case 'suspend':
+      case 'deactivate':
         updateData.isActive = false;
-        updateData.status = 'suspended';
-        break;
-      case 'ban':
-        updateData.isActive = false;
-        updateData.status = 'banned';
         break;
       case 'delete':
-        await this.userModel.deleteMany({ _id: { $in: userIds } });
-        return { message: `${userIds.length} users deleted successfully` };
+        // Soft delete - set isActive to false
+        updateData.isActive = false;
+        updateData.deactivatedAt = new Date();
+        updateData.deactivatedReason = reason || 'Bulk deletion by admin';
+        break;
       default:
         throw new BadRequestException('Invalid action');
     }
-
-    updateData.statusReason = reason;
-    updateData.statusUpdatedAt = new Date();
 
     const result = await this.userModel.updateMany(
       { _id: { $in: userIds } },
       updateData
     );
 
-    return { message: `${result.modifiedCount} users updated successfully` };
+    return {
+      message: `Bulk ${action} completed successfully`,
+      affectedCount: result.modifiedCount,
+    };
   }
 
   // Export users
@@ -1031,5 +1092,50 @@ export class AdminService {
     }
 
     return { message: 'Notification sent successfully' };
+  }
+
+  // Notices Management
+  async getAllNotices(query: any) {
+    const { page = 1, limit = 10 } = query;
+    const skip = (page - 1) * limit;
+    
+    const notices = await this.noticeModel
+      .find()
+      .skip(skip)
+      .limit(parseInt(limit))
+      .sort({ createdAt: -1 });
+
+    const total = await this.noticeModel.countDocuments();
+
+    return {
+      notices,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async createNotice(createData: any) {
+    const notice = new this.noticeModel(createData);
+    return await notice.save();
+  }
+
+  async updateNotice(id: string, updateData: any) {
+    const notice = await this.noticeModel.findByIdAndUpdate(id, updateData, { new: true });
+    if (!notice) {
+      throw new NotFoundException('Notice not found');
+    }
+    return notice;
+  }
+
+  async deleteNotice(id: string) {
+    const notice = await this.noticeModel.findByIdAndDelete(id);
+    if (!notice) {
+      throw new NotFoundException('Notice not found');
+    }
+    return notice;
   }
 } 

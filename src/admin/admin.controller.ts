@@ -251,22 +251,10 @@ export class AdminController {
   @ApiQuery({ name: 'status', required: false, enum: ['active', 'inactive', 'archived'] })
   @ApiQuery({ name: 'currency', required: false, enum: ['naira', 'usdt'] })
   @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   async getAllPlans(@Query() query: any) {
     return this.adminService.getAllPlans(query);
-  }
-
-  @Get('plans/stats')
-  @ApiOperation({ summary: 'Get investment plans statistics (Admin only)' })
-  @ApiResponse({ status: 200, description: 'Plans stats retrieved successfully' })
-  async getPlansStats() {
-    return this.adminService.getPlansStats();
-  }
-
-  @Get('plans/analytics')
-  @ApiOperation({ summary: 'Get investment plans analytics (Admin only)' })
-  @ApiResponse({ status: 200, description: 'Plans analytics retrieved successfully' })
-  async getPlansAnalytics() {
-    return this.adminService.getPlansAnalytics();
   }
 
   @Post('plans')
@@ -298,12 +286,59 @@ export class AdminController {
     return this.adminService.updatePlanPerformance(id);
   }
 
+  @Get('plans/stats')
+  @ApiOperation({ summary: 'Get investment plans statistics (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Plans stats retrieved successfully' })
+  async getPlansStats() {
+    return this.adminService.getPlansStats();
+  }
+
+  @Get('plans/analytics')
+  @ApiOperation({ summary: 'Get investment plans analytics (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Plans analytics retrieved successfully' })
+  async getPlansAnalytics() {
+    return this.adminService.getPlansAnalytics();
+  }
+
+  // Notices Management
+  @Get('notices')
+  @ApiOperation({ summary: 'Get all notices (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Notices retrieved successfully' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getAllNotices(@Query() query: any) {
+    return this.adminService.getAllNotices(query);
+  }
+
+  @Post('notices')
+  @ApiOperation({ summary: 'Create a new notice (Admin only)' })
+  @ApiResponse({ status: 201, description: 'Notice created successfully' })
+  async createNotice(@Body() createData: any) {
+    return this.adminService.createNotice(createData);
+  }
+
+  @Patch('notices/:id')
+  @ApiOperation({ summary: 'Update a notice (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Notice updated successfully' })
+  async updateNotice(@Param('id') id: string, @Body() updateData: any) {
+    return this.adminService.updateNotice(id, updateData);
+  }
+
+  @Delete('notices/:id')
+  @ApiOperation({ summary: 'Delete a notice (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Notice deleted successfully' })
+  async deleteNotice(@Param('id') id: string) {
+    return this.adminService.deleteNotice(id);
+  }
+
   // ROI Management
   @Get('plans/roi-settings')
   @ApiOperation({ summary: 'Get ROI settings for all plans (Admin only)' })
   @ApiResponse({ status: 200, description: 'ROI settings retrieved successfully' })
-  async getRoiSettings() {
-    return this.adminService.getRoiSettings();
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getRoiSettings(@Query() query: any) {
+    return this.adminService.getRoiSettingsPaginated(query);
   }
 
   @Get('plans/roi-stats')
@@ -314,7 +349,7 @@ export class AdminController {
   }
 
   @Patch('plans/roi-settings/:id')
-  @ApiOperation({ summary: 'Update ROI setting (Admin only)' })
+  @ApiOperation({ summary: 'Update ROI setting for a plan (Admin only)' })
   @ApiResponse({ status: 200, description: 'ROI setting updated successfully' })
   async updateRoiSetting(@Param('id') id: string, @Body() updateData: any) {
     return this.adminService.updateRoiSetting(id, updateData);

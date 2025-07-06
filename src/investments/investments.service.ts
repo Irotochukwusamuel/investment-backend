@@ -454,13 +454,14 @@ export class InvestmentsService {
   }
 
   async getActiveInvestments(): Promise<Investment[]> {
-    return this.investmentModel
-      .find({ status: InvestmentStatus.ACTIVE })
-      .populate('userId', 'firstName lastName email')
-      .populate('planId', 'name description dailyRoi')
-      .populate('payoutHistory', 'amount currency type status createdAt description reference')
-      .sort({ nextRoiUpdate: 1 })
-      .exec();
+    return this.investmentModel.find({ status: InvestmentStatus.ACTIVE }).exec();
+  }
+
+  async findActiveInvestmentsByUser(userId: string): Promise<Investment[]> {
+    return this.investmentModel.find({
+      userId: new Types.ObjectId(userId),
+      status: InvestmentStatus.ACTIVE
+    }).exec();
   }
 
   // Handle bonus withdrawal with 15-day rule

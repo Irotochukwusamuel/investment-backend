@@ -10,6 +10,7 @@ import { UsersModule } from '../users/users.module';
 import { EmailModule } from '../email/email.module';
 import { AdminModule } from '../admin/admin.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { InvestmentsModule } from '../investments/investments.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { PaymentsModule } from '../payments/payments.module';
     EmailModule,
     forwardRef(() => AdminModule),
     PaymentsModule,
+    forwardRef(() => InvestmentsModule),
   ],
   controllers: [WithdrawalsController],
   providers: [WithdrawalsService],

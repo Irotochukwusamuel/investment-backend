@@ -11,6 +11,7 @@ import { TransactionType, TransactionStatus } from '../transactions/schemas/tran
 import { WalletType } from '../wallet/schemas/wallet.schema';
 import { AdminService } from '../admin/admin.service';
 import { PaymentsService } from '../payments/payments.service';
+import { InvestmentsService } from '../investments/investments.service';
 
 @Injectable()
 export class WithdrawalsService {
@@ -21,6 +22,7 @@ export class WithdrawalsService {
     private readonly usersService: UsersService,
     @Inject(forwardRef(() => AdminService)) private readonly adminService: AdminService,
     private readonly paymentsService: PaymentsService,
+    @Inject(forwardRef(() => InvestmentsService)) private readonly investmentsService: InvestmentsService,
   ) {}
 
   async createWithdrawal(userId: string, createWithdrawalDto: CreateWithdrawalDto) {
@@ -31,6 +33,28 @@ export class WithdrawalsService {
     if (amount < settings.minWithdrawalAmount || amount > settings.maxWithdrawalAmount) {
       throw new BadRequestException(
         `Withdrawal amount must be between ₦${settings.minWithdrawalAmount} and ₦${settings.maxWithdrawalAmount}`
+      );
+    }
+
+    // Check if user has active investments
+    const activeInvestments = await this.investmentsService.findActiveInvestmentsByUser(userId);
+    if (activeInvestments.length === 0) {
+      throw new BadRequestException(
+        'You must have at least one active investment to withdraw funds. Only ROI earnings can be withdrawn.'
+      );
+    }
+
+    // Get user's wallet to check available earnings
+    const wallet = await this.walletService.findByUserAndType(userId, WalletType.MAIN);
+    if (!wallet) {
+      throw new BadRequestException('Wallet not found');
+    }
+
+    // Check if user has sufficient earnings (not deposits)
+    const availableEarnings = currency === 'naira' ? wallet.totalEarnings : wallet.totalEarnings;
+    if (availableEarnings < amount) {
+      throw new BadRequestException(
+        `Insufficient earnings. You can only withdraw your ROI earnings (₦${availableEarnings.toLocaleString()}), not your deposited amounts.`
       );
     }
 
@@ -59,7 +83,7 @@ export class WithdrawalsService {
       type: TransactionType.WITHDRAWAL,
       amount: -amount, // Negative amount for withdrawal
       currency,
-      description: `Withdrawal to ${bankDetails.bankName} - ${bankDetails.accountNumber}`,
+      description: `ROI Withdrawal to ${bankDetails.bankName} - ${bankDetails.accountNumber}`,
       status: TransactionStatus.PENDING,
       reference,
     });
@@ -101,7 +125,7 @@ export class WithdrawalsService {
       walletType: WalletType.MAIN,
       amount,
       currency,
-      description: `Withdrawal - ${reference}`,
+      description: `ROI Withdrawal - ${reference}`,
     });
 
     // Check auto payout setting and process accordingly
@@ -124,7 +148,7 @@ export class WithdrawalsService {
 
     return {
       success: true,
-      message: autoPayout ? 'Withdrawal request created and payout initiated' : 'Withdrawal request created successfully',
+      message: autoPayout ? 'ROI withdrawal request created and payout initiated' : 'ROI withdrawal request created successfully',
       data: {
         withdrawalId: savedWithdrawal._id,
         reference: savedWithdrawal.reference,
