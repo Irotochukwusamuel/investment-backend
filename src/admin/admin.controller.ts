@@ -384,4 +384,15 @@ export class AdminController {
   async updateWithdrawalSettings(@Body() settingsData: any) {
     return this.adminService.updateWithdrawalSettings(settingsData);
   }
+
+  // Withdrawal Policy (ROI Only toggle)
+  @Get('settings/withdrawal-policy')
+  async getWithdrawalPolicy() {
+    return this.adminService.getWithdrawalPolicy();
+  }
+
+  @Patch('settings/withdrawal-policy')
+  async updateWithdrawalPolicy(@Body() body: { roiOnly: boolean }) {
+    return this.adminService.updateWithdrawalPolicy(body);
+  }
 } 

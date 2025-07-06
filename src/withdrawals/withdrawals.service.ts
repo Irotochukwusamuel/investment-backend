@@ -36,26 +36,32 @@ export class WithdrawalsService {
       );
     }
 
-    // Check if user has active investments
-    const activeInvestments = await this.investmentsService.findActiveInvestmentsByUser(userId);
-    if (activeInvestments.length === 0) {
-      throw new BadRequestException(
-        'You must have at least one active investment to withdraw funds. Only ROI earnings can be withdrawn.'
-      );
-    }
+    // Check withdrawal policy (ROI only toggle)
+    const withdrawalPolicy = await this.adminService.getWithdrawalPolicy();
+    const enforceRoiOnly = withdrawalPolicy?.roiOnly !== false;
 
-    // Get user's wallet to check available earnings
-    const wallet = await this.walletService.findByUserAndType(userId, WalletType.MAIN);
-    if (!wallet) {
-      throw new BadRequestException('Wallet not found');
-    }
+    if (enforceRoiOnly) {
+      // Check if user has active investments
+      const activeInvestments = await this.investmentsService.findActiveInvestmentsByUser(userId);
+      if (activeInvestments.length === 0) {
+        throw new BadRequestException(
+          'You must have at least one active investment to withdraw funds. Only ROI earnings can be withdrawn.'
+        );
+      }
 
-    // Check if user has sufficient earnings (not deposits)
-    const availableEarnings = currency === 'naira' ? wallet.totalEarnings : wallet.totalEarnings;
-    if (availableEarnings < amount) {
-      throw new BadRequestException(
-        `Insufficient earnings. You can only withdraw your ROI earnings (₦${availableEarnings.toLocaleString()}), not your deposited amounts.`
-      );
+      // Get user's wallet to check available earnings
+      const wallet = await this.walletService.findByUserAndType(userId, WalletType.MAIN);
+      if (!wallet) {
+        throw new BadRequestException('Wallet not found');
+      }
+
+      // Check if user has sufficient earnings (not deposits)
+      const availableEarnings = currency === 'naira' ? wallet.totalEarnings : wallet.totalEarnings;
+      if (availableEarnings < amount) {
+        throw new BadRequestException(
+          `Insufficient earnings. You can only withdraw your ROI earnings (₦${availableEarnings.toLocaleString()}), not your deposited amounts.`
+        );
+      }
     }
 
     // Check if user has sufficient balance

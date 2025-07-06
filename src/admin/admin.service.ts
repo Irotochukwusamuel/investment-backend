@@ -948,6 +948,28 @@ export class AdminService {
     return settingsData;
   }
 
+  // Withdrawal Policy (ROI Only toggle)
+  async getWithdrawalPolicy() {
+    const doc = await this.settingsModel.findOne({ key: 'platform' });
+    if (doc && doc.value && doc.value.withdrawalPolicy) {
+      return doc.value.withdrawalPolicy;
+    }
+    // Default: ROI only enforced
+    return { roiOnly: true };
+  }
+
+  async updateWithdrawalPolicy(policy: { roiOnly: boolean }) {
+    const doc = await this.settingsModel.findOne({ key: 'platform' });
+    let value = doc?.value || {};
+    value.withdrawalPolicy = { ...value.withdrawalPolicy, ...policy };
+    await this.settingsModel.updateOne(
+      { key: 'platform' },
+      { value },
+      { upsert: true }
+    );
+    return value.withdrawalPolicy;
+  }
+
   // Bulk operations
   async bulkAction(userIds: string[], action: string, reason?: string) {
     const updateData: any = {
