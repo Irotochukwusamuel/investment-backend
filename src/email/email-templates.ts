@@ -722,13 +722,13 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p>We've received your withdrawal request and it's now being processed by our team.</p>
               
               <div class="amount">
-                -${data.currency} ${data.amount.toLocaleString()}
+                -${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.amount.toLocaleString()}
               </div>
               <p style="text-align: center; font-size: 1.2em; color: #dc3545;">Withdrawal Amount</p>
               
               <div class="withdrawal-details">
                 <h3>📋 Withdrawal Details</h3>
-                <p><strong>Amount:</strong> ${data.currency} ${data.amount.toLocaleString()}</p>
+                <p><strong>Amount:</strong> ${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.amount.toLocaleString()}</p>
                 <p><strong>Withdrawal Method:</strong> ${data.withdrawalMethod}</p>
                 <p><strong>Reference:</strong> ${data.reference}</p>
                 <p><strong>Request Date:</strong> ${new Date(data.requestDate).toLocaleDateString()}</p>
@@ -791,13 +791,13 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p>Your withdrawal has been processed successfully and the funds have been sent to your account.</p>
               
               <div class="amount">
-                -${data.currency} ${data.amount.toLocaleString()}
+                -${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.amount.toLocaleString()}
               </div>
               <p style="text-align: center; font-size: 1.2em; color: #28a745;">Withdrawal Amount</p>
               
               <div class="withdrawal-details">
                 <h3>📋 Withdrawal Details</h3>
-                <p><strong>Amount:</strong> ${data.currency} ${data.amount.toLocaleString()}</p>
+                <p><strong>Amount:</strong> ${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.amount.toLocaleString()}</p>
                 <p><strong>Withdrawal Method:</strong> ${data.withdrawalMethod}</p>
                 <p><strong>Reference:</strong> ${data.reference}</p>
                 <p><strong>Completion Date:</strong> ${new Date(data.completionDate).toLocaleDateString()}</p>
@@ -861,13 +861,13 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p>We've received your deposit request. Please follow the instructions below to complete your deposit.</p>
               
               <div class="amount">
-                +${data.currency} ${data.amount.toLocaleString()}
+                +${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.amount.toLocaleString()}
               </div>
               <p style="text-align: center; font-size: 1.2em; color: #007bff;">Deposit Amount</p>
               
               <div class="deposit-details">
                 <h3>📋 Deposit Details</h3>
-                <p><strong>Amount:</strong> ${data.currency} ${data.amount.toLocaleString()}</p>
+                <p><strong>Amount:</strong> ${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.amount.toLocaleString()}</p>
                 <p><strong>Payment Method:</strong> ${data.paymentMethod}</p>
                 <p><strong>Reference:</strong> ${data.reference}</p>
                 <p><strong>Request Date:</strong> ${new Date(data.requestDate).toLocaleDateString()}</p>
@@ -930,13 +930,13 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p>Your deposit has been confirmed and the funds are now available in your wallet.</p>
               
               <div class="amount">
-                +${data.currency} ${data.amount.toLocaleString()}
+                +${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.amount.toLocaleString()}
               </div>
               <p style="text-align: center; font-size: 1.2em; color: #28a745;">Deposit Amount</p>
               
               <div class="deposit-details">
                 <h3>📋 Deposit Details</h3>
-                <p><strong>Amount:</strong> ${data.currency} ${data.amount.toLocaleString()}</p>
+                <p><strong>Amount:</strong> ${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.amount.toLocaleString()}</p>
                 <p><strong>Payment Method:</strong> ${data.paymentMethod}</p>
                 <p><strong>Reference:</strong> ${data.reference}</p>
                 <p><strong>Confirmation Date:</strong> ${new Date(data.confirmationDate).toLocaleDateString()}</p>
