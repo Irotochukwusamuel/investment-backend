@@ -5,7 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { Investment, InvestmentDocument } from '../investments/schemas/investment.schema';
 import { Withdrawal, WithdrawalDocument } from '../withdrawals/schemas/withdrawal.schema';
-import { Wallet, WalletDocument } from '../wallet/schemas/wallet.schema';
+import { Wallet, WalletDocument, WalletType } from '../wallet/schemas/wallet.schema';
 import { InvestmentPlan, InvestmentPlanDocument } from '../investment-plans/schemas/investment-plan.schema';
 import { Notice, NoticeDocument } from '../schemas/notice.schema';
 import { Settings, SettingsDocument } from '../schemas/settings.schema';
@@ -17,7 +17,9 @@ import { InvestmentPlansService } from '../investment-plans/investment-plans.ser
 import { NoticeService } from '../notice/notice.service';
 import { EmailService } from '../email/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { TransactionStatus } from '../transactions/schemas/transaction.schema';
 import { NotificationType, NotificationCategory } from '../notifications/schemas/notification.schema';
+import { TransactionsService } from '../transactions/transactions.service';
 
 @Injectable()
 export class AdminService {
@@ -37,6 +39,7 @@ export class AdminService {
     private readonly noticeService: NoticeService,
     private readonly emailService: EmailService,
     private readonly notificationsService: NotificationsService,
+    private readonly transactionsService: TransactionsService,
   ) {}
 
   // Dashboard Stats
@@ -417,11 +420,72 @@ export class AdminService {
   }
 
   async updateWithdrawal(id: string, updateData: any) {
-    const withdrawal = await this.withdrawalModel.findByIdAndUpdate(id, updateData, { new: true });
+    const withdrawal = await this.withdrawalModel.findById(id);
     if (!withdrawal) {
       throw new NotFoundException('Withdrawal not found');
     }
-    return withdrawal;
+
+    // Store the original status to check if we need to handle balance correction
+    const originalStatus = withdrawal.status;
+    const newStatus = updateData.status;
+
+    // Update the withdrawal
+    const updatedWithdrawal = await this.withdrawalModel.findByIdAndUpdate(id, updateData, { new: true });
+
+    // Handle balance correction when status changes to failed
+    if (originalStatus !== 'failed' && newStatus === 'failed') {
+      try {
+        // Refund the amount to user's wallet
+        await this.walletService.deposit(withdrawal.userId.toString(), {
+          walletType: WalletType.MAIN,
+          amount: withdrawal.amount,
+          currency: withdrawal.currency,
+          description: `Refund for failed withdrawal - ${withdrawal.reference}`,
+        });
+
+        // Update the related transaction status
+        if (withdrawal.transactionId) {
+          await this.transactionsService.update(withdrawal.transactionId.toString(), {
+            status: TransactionStatus.FAILED,
+            failedAt: new Date(),
+            failureReason: updateData.failureReason || 'Marked as failed by admin',
+          });
+        }
+
+        // Create notification for the user
+        await this.notificationsService.createTransactionNotification(
+          withdrawal.userId.toString(),
+          'Withdrawal Failed',
+          `Your withdrawal request of ${withdrawal.currency === 'naira' ? '₦' : '$'}${withdrawal.amount.toLocaleString()} has been marked as failed. The amount has been refunded to your wallet.`,
+          NotificationType.ERROR
+        );
+
+        // Send email notification
+        const user = await this.userModel.findById(withdrawal.userId);
+        if (user) {
+          await this.emailService.sendWithdrawalFailedEmail(
+            user.email,
+            user.firstName || user.email,
+            {
+              amount: withdrawal.amount,
+              currency: withdrawal.currency,
+              reference: withdrawal.reference,
+              failureReason: updateData.failureReason || 'Marked as failed by admin',
+              refundedAmount: withdrawal.amount,
+              refundedCurrency: withdrawal.currency,
+            }
+          );
+        }
+
+        console.log(`Balance corrected for failed withdrawal ${withdrawal.reference}: ${withdrawal.amount} ${withdrawal.currency} refunded to user ${withdrawal.userId}`);
+      } catch (error) {
+        console.error(`Error correcting balance for failed withdrawal ${withdrawal.reference}:`, error);
+        // Don't throw error as the withdrawal status update was successful
+        // The balance correction can be handled manually if needed
+      }
+    }
+
+    return updatedWithdrawal;
   }
 
   async deleteWithdrawal(id: string) {
@@ -903,6 +967,7 @@ export class AdminService {
     // fallback to defaults
     return {
       withdrawalLimits: { minAmount: 1000, maxAmount: 1000000 },
+      depositLimits: { minAmount: 100, maxAmount: 1000000 },
       fees: { withdrawalFee: 2.5, depositFee: 0, transactionFee: 1.0 },
       security: { requireEmailVerification: true, requirePhoneVerification: false, twoFactorAuth: false, sessionTimeout: 24 },
       notifications: { emailNotifications: true, smsNotifications: false, pushNotifications: true },
@@ -912,12 +977,457 @@ export class AdminService {
   }
 
   async updateSettings(settingsData: any) {
-    await this.settingsModel.updateOne(
-      { key: 'platform' },
-      { value: settingsData },
-      { upsert: true }
-    );
-    return settingsData;
+    try {
+      // Validate settings data
+      this.validateSettingsData(settingsData);
+      
+      // Get old settings for comparison
+      const oldSettings = await this.getSettings();
+      
+      // Update settings in database
+      await this.settingsModel.updateOne(
+        { key: 'platform' },
+        { value: settingsData },
+        { upsert: true }
+      );
+      
+      // Handle specific setting changes that affect all users
+      await this.handleSettingsChanges(oldSettings, settingsData);
+      
+      // Log the settings update
+      console.log('Platform settings updated:', {
+        oldSettings: oldSettings,
+        newSettings: settingsData,
+        timestamp: new Date().toISOString()
+      });
+      
+      return settingsData;
+    } catch (error) {
+      console.error('Error updating platform settings:', error);
+      throw new BadRequestException(`Failed to update settings: ${error.message}`);
+    }
+  }
+
+  /**
+   * Validate settings data before saving
+   */
+  private validateSettingsData(settingsData: any) {
+    if (!settingsData) {
+      throw new BadRequestException('Settings data is required');
+    }
+
+    // Validate withdrawal limits
+    if (settingsData.withdrawalLimits) {
+      if (settingsData.withdrawalLimits.minAmount < 0) {
+        throw new BadRequestException('Minimum withdrawal amount cannot be negative');
+      }
+      if (settingsData.withdrawalLimits.maxAmount <= 0) {
+        throw new BadRequestException('Maximum withdrawal amount must be positive');
+      }
+      if (settingsData.withdrawalLimits.minAmount >= settingsData.withdrawalLimits.maxAmount) {
+        throw new BadRequestException('Minimum withdrawal amount must be less than maximum');
+      }
+    }
+
+    // Validate deposit limits
+    if (settingsData.depositLimits) {
+      if (settingsData.depositLimits.minAmount < 0) {
+        throw new BadRequestException('Minimum deposit amount cannot be negative');
+      }
+      if (settingsData.depositLimits.maxAmount <= 0) {
+        throw new BadRequestException('Maximum deposit amount must be positive');
+      }
+      if (settingsData.depositLimits.minAmount >= settingsData.depositLimits.maxAmount) {
+        throw new BadRequestException('Minimum deposit amount must be less than maximum');
+      }
+    }
+
+    // Validate fees
+    if (settingsData.fees) {
+      if (settingsData.fees.withdrawalFee < 0 || settingsData.fees.withdrawalFee > 100) {
+        throw new BadRequestException('Withdrawal fee must be between 0 and 100');
+      }
+      if (settingsData.fees.depositFee < 0 || settingsData.fees.depositFee > 100) {
+        throw new BadRequestException('Deposit fee must be between 0 and 100');
+      }
+      if (settingsData.fees.transactionFee < 0 || settingsData.fees.transactionFee > 100) {
+        throw new BadRequestException('Transaction fee must be between 0 and 100');
+      }
+    }
+
+    // Validate security settings
+    if (settingsData.security) {
+      if (settingsData.security.sessionTimeout < 1 || settingsData.security.sessionTimeout > 168) {
+        throw new BadRequestException('Session timeout must be between 1 and 168 hours');
+      }
+    }
+  }
+
+  /**
+   * Handle specific setting changes that affect all users
+   */
+  private async handleSettingsChanges(oldSettings: any, newSettings: any) {
+    const changes: string[] = [];
+
+    // Check for withdrawal fee changes
+    if (oldSettings?.fees?.withdrawalFee !== newSettings?.fees?.withdrawalFee) {
+      changes.push(`Withdrawal fee changed from ${oldSettings?.fees?.withdrawalFee || 0}% to ${newSettings?.fees?.withdrawalFee || 0}%`);
+      await this.updatePendingWithdrawalFees(newSettings.fees.withdrawalFee);
+      await this.notifyUsersAboutFeeChange(newSettings.fees.withdrawalFee);
+    }
+
+    // Check for withdrawal limits changes
+    if (JSON.stringify(oldSettings?.withdrawalLimits) !== JSON.stringify(newSettings?.withdrawalLimits)) {
+      changes.push('Withdrawal limits updated');
+      await this.notifyUsersAboutWithdrawalLimitsChange(newSettings.withdrawalLimits);
+    }
+
+    // Check for deposit limits changes
+    if (JSON.stringify(oldSettings?.depositLimits) !== JSON.stringify(newSettings?.depositLimits)) {
+      changes.push('Deposit limits updated');
+      await this.notifyUsersAboutDepositLimitsChange(newSettings.depositLimits);
+    }
+
+    // Check for deposit fee changes
+    if (oldSettings?.fees?.depositFee !== newSettings?.fees?.depositFee) {
+      changes.push(`Deposit fee changed from ${oldSettings?.fees?.depositFee || 0}% to ${newSettings?.fees?.depositFee || 0}%`);
+      await this.notifyUsersAboutDepositFeeChange(newSettings.fees.depositFee);
+    }
+
+    // Check for auto payout changes
+    if (oldSettings?.autoPayout !== newSettings?.autoPayout) {
+      changes.push(`Auto payout ${newSettings?.autoPayout ? 'enabled' : 'disabled'}`);
+      await this.notifyUsersAboutAutoPayoutChange(newSettings.autoPayout);
+    }
+
+    // Check for maintenance mode changes
+    if (JSON.stringify(oldSettings?.maintenance) !== JSON.stringify(newSettings?.maintenance)) {
+      changes.push('Maintenance mode settings updated');
+      await this.notifyUsersAboutMaintenanceModeChange(newSettings.maintenance);
+    }
+
+    // Check for security changes
+    if (JSON.stringify(oldSettings?.security) !== JSON.stringify(newSettings?.security)) {
+      changes.push('Security settings updated');
+      await this.notifyUsersAboutSecurityChanges(newSettings.security);
+    }
+
+    if (changes.length > 0) {
+      console.log('Settings changes detected:', changes);
+      
+      // Log the changes instead of creating an admin notification
+      console.log('Platform settings updated:', changes.join(', '));
+    }
+  }
+
+  /**
+   * Notify users about withdrawal limits changes
+   */
+  private async notifyUsersAboutWithdrawalLimitsChange(limits: any) {
+    try {
+      const activeUsers = await this.userModel.find({ isActive: true }).select('_id email firstName');
+
+      const notificationPromises = activeUsers.map(user => 
+        this.notificationsService.createTransactionNotification(
+          user._id.toString(),
+          'Withdrawal Limits Updated',
+          `Withdrawal limits have been updated. New range: ${limits.minAmount.toLocaleString()} - ${limits.maxAmount.toLocaleString()}`,
+          NotificationType.INFO
+        )
+      );
+
+      await Promise.all(notificationPromises);
+
+      // Send email notifications
+      const emailPromises = activeUsers.map(user =>
+        this.emailService.sendEmail(
+          user.email,
+          'Withdrawal Limits Updated - KLT Mines',
+          `
+          <h2>Hello ${user.firstName || user.email}!</h2>
+          <p>We want to inform you about an update to our withdrawal limits.</p>
+          <p><strong>New Withdrawal Limits:</strong></p>
+          <ul>
+            <li>Minimum: ${limits.minAmount.toLocaleString()}</li>
+            <li>Maximum: ${limits.maxAmount.toLocaleString()}</li>
+          </ul>
+          <p>These changes are effective immediately for all new withdrawal requests.</p>
+          <p>Thank you for using KLT Mines!</p>
+          `
+        ).catch(error => {
+          console.error(`Failed to send withdrawal limits email to ${user.email}:`, error);
+        })
+      );
+
+      await Promise.all(emailPromises);
+    } catch (error) {
+      console.error('Error notifying users about withdrawal limits change:', error);
+    }
+  }
+
+  /**
+   * Notify users about deposit limits changes
+   */
+  private async notifyUsersAboutDepositLimitsChange(limits: any) {
+    try {
+      const activeUsers = await this.userModel.find({ isActive: true }).select('_id email firstName');
+
+      const notificationPromises = activeUsers.map(user => 
+        this.notificationsService.createTransactionNotification(
+          user._id.toString(),
+          'Deposit Limits Updated',
+          `Deposit limits have been updated. New range: ${limits.minAmount.toLocaleString()} - ${limits.maxAmount.toLocaleString()}`,
+          NotificationType.INFO
+        )
+      );
+
+      await Promise.all(notificationPromises);
+
+      // Send email notifications
+      const emailPromises = activeUsers.map(user =>
+        this.emailService.sendEmail(
+          user.email,
+          'Deposit Limits Updated - KLT Mines',
+          `
+          <h2>Hello ${user.firstName || user.email}!</h2>
+          <p>We want to inform you about an update to our deposit limits.</p>
+          <p><strong>New Deposit Limits:</strong></p>
+          <ul>
+            <li>Minimum: ${limits.minAmount.toLocaleString()}</li>
+            <li>Maximum: ${limits.maxAmount.toLocaleString()}</li>
+          </ul>
+          <p>These changes are effective immediately for all new deposit requests.</p>
+          <p>Thank you for using KLT Mines!</p>
+          `
+        ).catch(error => {
+          console.error(`Failed to send deposit limits email to ${user.email}:`, error);
+        })
+      );
+
+      await Promise.all(emailPromises);
+    } catch (error) {
+      console.error('Error notifying users about deposit limits change:', error);
+    }
+  }
+
+  /**
+   * Notify users about deposit fee changes
+   */
+  private async notifyUsersAboutDepositFeeChange(newFeePercentage: number) {
+    try {
+      // Get all active users
+      const activeUsers = await this.userModel.find({ isActive: true }).select('_id email firstName');
+
+      // Create notification for each user
+      const notificationPromises = activeUsers.map(user => 
+        this.notificationsService.createTransactionNotification(
+          user._id.toString(),
+          'Deposit Fee Updated',
+          `The deposit fee has been updated to ${newFeePercentage}%. This change affects all future deposits.`,
+          NotificationType.INFO
+        )
+      );
+
+      await Promise.all(notificationPromises);
+
+      // Send email notification to all users
+      const emailPromises = activeUsers.map(user =>
+        this.emailService.sendEmail(
+          user.email,
+          'Deposit Fee Updated - KLT Mines',
+          `
+          <h2>Hello ${user.firstName || user.email}!</h2>
+          <p>We want to inform you about an update to our deposit fee.</p>
+          <p><strong>New Deposit Fee:</strong> ${newFeePercentage}%</p>
+          <p>This change affects all future deposits and is effective immediately.</p>
+          <p>Thank you for using KLT Mines!</p>
+          `
+        ).catch(error => {
+          console.error(`Failed to send deposit fee update email to ${user.email}:`, error);
+          // Don't fail the entire operation if one email fails
+        })
+      );
+
+      await Promise.all(emailPromises);
+
+      return {
+        message: `Notified ${activeUsers.length} users about deposit fee change`,
+        notifiedCount: activeUsers.length
+      };
+    } catch (error) {
+      console.error('Error notifying users about deposit fee change:', error);
+      // Don't throw error as this is not critical to the fee update process
+    }
+  }
+
+  /**
+   * Notify users about auto payout changes
+   */
+  private async notifyUsersAboutAutoPayoutChange(autoPayout: boolean) {
+    try {
+      const activeUsers = await this.userModel.find({ isActive: true }).select('_id email firstName');
+
+      const notificationPromises = activeUsers.map(user => 
+        this.notificationsService.createTransactionNotification(
+          user._id.toString(),
+          'Auto Payout Status Updated',
+          `Auto payout has been ${autoPayout ? 'enabled' : 'disabled'}. ${autoPayout ? 'Withdrawals will now be processed automatically.' : 'Withdrawals will require manual processing.'}`,
+          NotificationType.INFO
+        )
+      );
+
+      await Promise.all(notificationPromises);
+    } catch (error) {
+      console.error('Error notifying users about auto payout change:', error);
+    }
+  }
+
+  /**
+   * Notify users about maintenance mode changes
+   */
+  private async notifyUsersAboutMaintenanceModeChange(maintenance: any) {
+    try {
+      const activeUsers = await this.userModel.find({ isActive: true }).select('_id email firstName');
+
+      if (maintenance.maintenanceMode) {
+        const notificationPromises = activeUsers.map(user => 
+          this.notificationsService.createTransactionNotification(
+            user._id.toString(),
+            'Platform Maintenance',
+            `Platform maintenance is now active. ${maintenance.maintenanceMessage || 'Please check back later.'}`,
+            NotificationType.WARNING
+          )
+        );
+
+        await Promise.all(notificationPromises);
+      }
+    } catch (error) {
+      console.error('Error notifying users about maintenance mode change:', error);
+    }
+  }
+
+  /**
+   * Notify users about security changes
+   */
+  private async notifyUsersAboutSecurityChanges(security: any) {
+    try {
+      const activeUsers = await this.userModel.find({ isActive: true }).select('_id email firstName');
+
+      const changes: string[] = [];
+      if (security.requireEmailVerification) changes.push('Email verification required');
+      if (security.requirePhoneVerification) changes.push('Phone verification required');
+      if (security.twoFactorAuth) changes.push('Two-factor authentication enabled');
+
+      if (changes.length > 0) {
+        const notificationPromises = activeUsers.map(user => 
+          this.notificationsService.createTransactionNotification(
+            user._id.toString(),
+            'Security Settings Updated',
+            `Security settings have been updated: ${changes.join(', ')}`,
+            NotificationType.INFO
+          )
+        );
+
+        await Promise.all(notificationPromises);
+      }
+    } catch (error) {
+      console.error('Error notifying users about security changes:', error);
+    }
+  }
+
+  /**
+   * Update fees for pending withdrawals when withdrawal fee changes
+   * This ensures all users are affected by the fee change
+   */
+  async updatePendingWithdrawalFees(newFeePercentage: number) {
+    try {
+      // Find all pending withdrawals
+      const pendingWithdrawals = await this.withdrawalModel.find({
+        status: { $in: ['pending', 'processing'] }
+      });
+
+      if (pendingWithdrawals.length === 0) {
+        return { message: 'No pending withdrawals to update', updatedCount: 0 };
+      }
+
+      let updatedCount = 0;
+      for (const withdrawal of pendingWithdrawals) {
+        // Recalculate fee and net amount
+        const newFee = withdrawal.amount * (newFeePercentage / 100);
+        const newNetAmount = withdrawal.amount - newFee;
+
+        // Update withdrawal record
+        withdrawal.fee = newFee;
+        withdrawal.netAmount = newNetAmount;
+        await withdrawal.save();
+
+        // Update related transaction if it exists
+        if (withdrawal.transactionId) {
+          await this.transactionsService.update(withdrawal.transactionId.toString(), {
+            fee: newFee,
+            netAmount: newNetAmount,
+          });
+        }
+
+        updatedCount++;
+      }
+
+      // Notify users about the fee change
+      await this.notifyUsersAboutFeeChange(newFeePercentage);
+
+      return {
+        message: `Updated fees for ${updatedCount} pending withdrawals`,
+        updatedCount,
+        newFeePercentage
+      };
+    } catch (error) {
+      console.error('Error updating pending withdrawal fees:', error);
+      throw new BadRequestException('Failed to update pending withdrawal fees');
+    }
+  }
+
+  /**
+   * Notify all users about withdrawal fee changes
+   */
+  async notifyUsersAboutFeeChange(newFeePercentage: number) {
+    try {
+      // Get all active users
+      const activeUsers = await this.userModel.find({ isActive: true }).select('_id email firstName');
+
+      // Create notification for each user
+      const notificationPromises = activeUsers.map(user => 
+        this.notificationsService.createTransactionNotification(
+          user._id.toString(),
+          'Withdrawal Fee Updated',
+          `The withdrawal fee has been updated to ${newFeePercentage}%. This change affects all future withdrawals.`,
+          NotificationType.INFO
+        )
+      );
+
+      await Promise.all(notificationPromises);
+
+      // Send email notification to all users
+      const emailPromises = activeUsers.map(user =>
+        this.emailService.sendWithdrawalFeeUpdateEmail(
+          user.email,
+          user.firstName || user.email,
+          newFeePercentage
+        ).catch(error => {
+          console.error(`Failed to send fee update email to ${user.email}:`, error);
+          // Don't fail the entire operation if one email fails
+        })
+      );
+
+      await Promise.all(emailPromises);
+
+      return {
+        message: `Notified ${activeUsers.length} users about fee change`,
+        notifiedCount: activeUsers.length
+      };
+    } catch (error) {
+      console.error('Error notifying users about fee change:', error);
+      // Don't throw error as this is not critical to the fee update process
+    }
   }
 
   // Withdrawal Settings

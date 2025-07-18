@@ -17,6 +17,7 @@ import { InvestmentPlansModule } from '../investment-plans/investment-plans.modu
 import { NoticeModule } from '../notice/notice.module';
 import { EmailModule } from '../email/email.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { TransactionsModule } from '../transactions/transactions.module';
 import { SettingsController } from './settings.controller';
 
 @Module({
@@ -38,6 +39,7 @@ import { SettingsController } from './settings.controller';
     NoticeModule,
     EmailModule,
     NotificationsModule,
+    TransactionsModule,
   ],
   controllers: [AdminController, SettingsController],
   providers: [AdminService],

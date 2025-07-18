@@ -14,13 +14,22 @@ export class EmailController {
   @ApiOperation({ summary: 'Get email service status' })
   @ApiResponse({ status: 200, description: 'Email service status retrieved successfully' })
   async getEmailStatus() {
-    return {
-      activeProvider: this.emailService.getActiveProviderName(),
-      fallbackProvider: this.emailService.getFallbackProviderName(),
-      activeProviderConfigured: this.emailService.isActiveProviderConfigured(),
-      fallbackProviderConfigured: this.emailService.isFallbackProviderConfigured(),
-      availableTemplates: this.emailService.getAvailableTemplates(),
-    };
+    try {
+      const status = this.emailService.getEmailServiceStatus();
+      return {
+        success: true,
+        data: status,
+      };
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to get email service status',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
   }
 
   @Post('test')
@@ -57,6 +66,33 @@ export class EmailController {
         {
           success: false,
           message: 'Failed to send test email',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  @Post('test-configuration')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Test email configuration (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Email configuration test completed' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Admin access required' })
+  async testEmailConfiguration(@Body() body: { to: string }) {
+    try {
+      const result = await this.emailService.testEmailConfiguration(body.to);
+      return {
+        success: result.success,
+        message: result.message,
+        provider: result.provider,
+      };
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to test email configuration',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR

@@ -432,10 +432,97 @@ export class EmailService {
   }
 
   /**
-   * Get the current active provider name
+   * Send withdrawal fee update email
+   */
+  async sendWithdrawalFeeUpdateEmail(
+    userEmail: string, 
+    userName: string, 
+    newFeePercentage: number
+  ): Promise<void> {
+    const dashboardUrl = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000') + '/dashboard/wallet';
+    
+    await this.sendTemplateEmail(userEmail, 'withdrawalFeeUpdate', {
+      userName,
+      userEmail,
+      dashboardUrl,
+      newFeePercentage,
+      updateDate: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Send withdrawal failed email
+   */
+  async sendWithdrawalFailedEmail(
+    userEmail: string, 
+    userName: string, 
+    withdrawalData: any
+  ): Promise<void> {
+    const dashboardUrl = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000') + '/dashboard/withdrawals';
+    
+    await this.sendTemplateEmail(userEmail, 'withdrawalFailed', {
+      userName,
+      userEmail,
+      dashboardUrl,
+      amount: withdrawalData.amount,
+      currency: withdrawalData.currency,
+      reference: withdrawalData.reference,
+      failureReason: withdrawalData.failureReason,
+      refundedAmount: withdrawalData.refundedAmount,
+      refundedCurrency: withdrawalData.refundedCurrency,
+    });
+  }
+
+  /**
+   * Get the name of the active email provider
    */
   getActiveProviderName(): string {
     return this.activeProvider.getProviderName();
+  }
+
+  /**
+   * Get email service status
+   */
+  getEmailServiceStatus() {
+    return {
+      activeProvider: this.activeProvider.getProviderName(),
+      fallbackProvider: this.fallbackProvider.getProviderName(),
+      activeProviderConfigured: this.activeProvider.isConfigured(),
+      fallbackProviderConfigured: this.fallbackProvider.isConfigured(),
+      availableTemplates: Object.keys(emailTemplates),
+    };
+  }
+
+  /**
+   * Test email configuration
+   */
+  async testEmailConfiguration(to: string): Promise<{ success: boolean; message: string; provider: string }> {
+    try {
+      await this.sendEmail(
+        to,
+        'Email Service Test - KLT Mines',
+        `
+          <h1>Email Service Test</h1>
+          <p>This is a test email to verify that the email service is working correctly.</p>
+          <p><strong>Provider:</strong> ${this.activeProvider.getProviderName()}</p>
+          <p><strong>Time:</strong> ${new Date().toISOString()}</p>
+          <p>If you received this email, the email service is configured and working properly.</p>
+        `
+      );
+      
+      return {
+        success: true,
+        message: 'Test email sent successfully',
+        provider: this.activeProvider.getProviderName(),
+      };
+    } catch (error) {
+      this.logger.error('Email configuration test failed:', error);
+      return {
+        success: false,
+        message: `Failed to send test email: ${error.message}`,
+        provider: this.activeProvider.getProviderName(),
+      };
+    }
   }
 
   /**

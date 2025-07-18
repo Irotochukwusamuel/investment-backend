@@ -241,7 +241,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p>You've received an ROI payment from your investment. Your money is working for you!</p>
               
               <div class="amount">
-                +${data.currency} ${data.amount.toLocaleString()}
+                +${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.amount.toLocaleString()}
               </div>
               
               <div class="payment-details">
@@ -822,6 +822,151 @@ export const emailTemplates: Record<string, EmailTemplate> = {
             <div class="footer">
               <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
               <p>Reference: ${data.reference}</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `
+  },
+
+  // Withdrawal Failed Email Template
+  withdrawalFailed: {
+    subject: 'Withdrawal Failed - KLT Mines',
+    html: (data: EmailTemplateData) => `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Withdrawal Failed</title>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #dc3545 0%, #fd7e14 50%, #ffc107 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+            .footer { text-align: center; margin-top: 30px; color: #666; font-size: 14px; }
+            .withdrawal-details { background: #f8d7da; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #dc3545; }
+            .amount { font-size: 2em; font-weight: bold; color: #dc3545; text-align: center; margin: 20px 0; }
+            .refund-info { background: #d4edda; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #28a745; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>❌ Withdrawal Failed</h1>
+              <p>Your Withdrawal Could Not Be Processed</p>
+            </div>
+            <div class="content">
+              <h2>Hello ${data.userName}!</h2>
+              <p>We regret to inform you that your withdrawal request could not be processed successfully.</p>
+              
+              <div class="amount">
+                -${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.amount.toLocaleString()}
+              </div>
+              <p style="text-align: center; font-size: 1.2em; color: #dc3545;">Failed Withdrawal Amount</p>
+              
+              <div class="withdrawal-details">
+                <h3>📋 Withdrawal Details</h3>
+                <p><strong>Amount:</strong> ${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.amount.toLocaleString()}</p>
+                <p><strong>Reference:</strong> ${data.reference}</p>
+                <p><strong>Status:</strong> <span style="color: #dc3545; font-weight: bold;">Failed</span></p>
+                <p><strong>Failure Reason:</strong> ${data.failureReason}</p>
+              </div>
+              
+              <div class="refund-info">
+                <h3>💰 Refund Information</h3>
+                <p><strong>Good News:</strong> The amount has been automatically refunded to your wallet.</p>
+                <p><strong>Refunded Amount:</strong> ${data.refundedCurrency === 'naira' ? '₦' : data.refundedCurrency.toUpperCase()} ${data.refundedAmount.toLocaleString()}</p>
+                <p><strong>Refund Status:</strong> <span style="color: #28a745; font-weight: bold;">Completed</span></p>
+                <p>You can check your wallet balance and try the withdrawal again if needed.</p>
+              </div>
+              
+              <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #ffc107;">
+                <h3>🔧 What You Can Do</h3>
+                <ul>
+                  <li>Check your wallet balance - the refund has been processed</li>
+                  <li>Verify your bank account details are correct</li>
+                  <li>Try the withdrawal again with a smaller amount</li>
+                  <li>Contact support if you need assistance</li>
+                </ul>
+              </div>
+              
+              <p><strong>Need Help?</strong> If you have any questions about this failed withdrawal, please contact our support team.</p>
+            </div>
+            <div class="footer">
+              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>Reference: ${data.reference}</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `
+  },
+
+  // Withdrawal Fee Update Email Template
+  withdrawalFeeUpdate: {
+    subject: 'Withdrawal Fee Updated - KLT Mines',
+    html: (data: EmailTemplateData) => `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Withdrawal Fee Updated</title>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #6f42c1 0%, #e83e8c 50%, #fd7e14 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+            .footer { text-align: center; margin-top: 30px; color: #666; font-size: 14px; }
+            .fee-update { background: #e2e3e5; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #6f42c1; }
+            .new-fee { font-size: 2em; font-weight: bold; color: #6f42c1; text-align: center; margin: 20px 0; }
+            .info-box { background: #d1ecf1; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #17a2b8; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>📊 Withdrawal Fee Updated</h1>
+              <p>Important Platform Update</p>
+            </div>
+            <div class="content">
+              <h2>Hello ${data.userName}!</h2>
+              <p>We want to inform you about an important update to our platform's withdrawal fee structure.</p>
+              
+              <div class="new-fee">
+                ${data.newFeePercentage}%
+              </div>
+              <p style="text-align: center; font-size: 1.2em; color: #6f42c1;">New Withdrawal Fee</p>
+              
+              <div class="fee-update">
+                <h3>📋 Fee Update Details</h3>
+                <p><strong>New Withdrawal Fee:</strong> ${data.newFeePercentage}%</p>
+                <p><strong>Effective Date:</strong> ${new Date(data.updateDate).toLocaleDateString()}</p>
+                <p><strong>Impact:</strong> This change affects all future withdrawal requests</p>
+              </div>
+              
+              <div class="info-box">
+                <h3>ℹ️ Important Information</h3>
+                <ul>
+                  <li>This fee change applies to all new withdrawal requests</li>
+                  <li>Existing pending withdrawals will be updated automatically</li>
+                  <li>The fee is calculated as a percentage of your withdrawal amount</li>
+                  <li>You can view the current fee in your withdrawal dialog</li>
+                </ul>
+              </div>
+              
+              <p><strong>Example:</strong> For a ₦100,000 withdrawal, the fee would be ₦${(100000 * data.newFeePercentage / 100).toLocaleString()}.</p>
+              
+              <div style="text-align: center;">
+                <a href="${data.dashboardUrl}" style="display: inline-block; background: #6f42c1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin-top: 20px;">View Wallet</a>
+              </div>
+              
+              <p><strong>Questions?</strong> If you have any questions about this fee update, please contact our support team.</p>
+            </div>
+            <div class="footer">
+              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>This email was sent to ${data.userEmail}</p>
             </div>
           </div>
         </body>
