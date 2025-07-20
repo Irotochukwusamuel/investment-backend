@@ -9,6 +9,8 @@ import { Wallet, WalletSchema } from '../wallet/schemas/wallet.schema';
 import { InvestmentPlan, InvestmentPlanSchema } from '../investment-plans/schemas/investment-plan.schema';
 import { Notice, NoticeSchema } from '../schemas/notice.schema';
 import { Settings, SettingsSchema } from '../schemas/settings.schema';
+import { Transaction, TransactionSchema } from '../transactions/schemas/transaction.schema';
+import { Referral, ReferralSchema } from '../referrals/schemas/referral.schema';
 import { UsersModule } from '../users/users.module';
 import { InvestmentsModule } from '../investments/investments.module';
 import { WithdrawalsModule } from '../withdrawals/withdrawals.module';
@@ -30,6 +32,8 @@ import { SettingsController } from './settings.controller';
       { name: InvestmentPlan.name, schema: InvestmentPlanSchema },
       { name: Notice.name, schema: NoticeSchema },
       { name: Settings.name, schema: SettingsSchema },
+      { name: Transaction.name, schema: TransactionSchema },
+      { name: Referral.name, schema: ReferralSchema },
     ]),
     UsersModule,
     InvestmentsModule,
