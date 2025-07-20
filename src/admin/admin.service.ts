@@ -20,6 +20,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { TransactionStatus } from '../transactions/schemas/transaction.schema';
 import { NotificationType, NotificationCategory } from '../notifications/schemas/notification.schema';
 import { TransactionsService } from '../transactions/transactions.service';
+import { Transaction, TransactionDocument } from '../transactions/schemas/transaction.schema';
+import { Referral, ReferralDocument } from '../referrals/schemas/referral.schema';
 
 @Injectable()
 export class AdminService {
@@ -31,6 +33,8 @@ export class AdminService {
     @InjectModel(InvestmentPlan.name) private planModel: Model<InvestmentPlanDocument>,
     @InjectModel(Notice.name) private noticeModel: Model<NoticeDocument>,
     @InjectModel(Settings.name) private settingsModel: Model<SettingsDocument>,
+    @InjectModel(Transaction.name) private transactionModel: Model<TransactionDocument>,
+    @InjectModel(Referral.name) private referralModel: Model<ReferralDocument>,
     private readonly usersService: UsersService,
     private readonly investmentsService: InvestmentsService,
     @Inject(forwardRef(() => WithdrawalsService)) private readonly withdrawalsService: WithdrawalsService,
@@ -276,11 +280,45 @@ export class AdminService {
   }
 
   async deleteUser(id: string) {
-    const user = await this.userModel.findByIdAndDelete(id);
+    const user = await this.userModel.findById(id);
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    return { message: 'User deleted successfully' };
+
+    // Start a session for transaction
+    const session = await this.userModel.db.startSession();
+    session.startTransaction();
+
+    try {
+      // Delete all related data
+      await Promise.all([
+        // Delete user's wallets
+        this.walletModel.deleteMany({ userId: new Types.ObjectId(id) }, { session }),
+        
+        // Delete user's investments
+        this.investmentModel.deleteMany({ userId: new Types.ObjectId(id) }, { session }),
+        
+        // Delete user's withdrawals
+        this.withdrawalModel.deleteMany({ userId: new Types.ObjectId(id) }, { session }),
+        
+        // Delete user's transactions
+        this.transactionModel.deleteMany({ userId: new Types.ObjectId(id) }, { session }),
+        
+        // Delete user's notifications
+        this.notificationsService.deleteAllForUser(id),
+      ]);
+
+      // Finally delete the user
+      await this.userModel.findByIdAndDelete(id, { session });
+
+      await session.commitTransaction();
+      return { message: 'User and all related data deleted successfully' };
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
   }
 
   // Investment Management
@@ -296,25 +334,103 @@ export class AdminService {
     }
 
     const skip = (page - 1) * limit;
-    const investments = await this.investmentModel
-      .find(filter)
-      .populate('userId', 'firstName lastName email')
-      .populate('planId', 'name')
-      .skip(skip)
-      .limit(parseInt(limit))
-      .sort({ createdAt: -1 });
+    
+    // Use aggregation to join with users and filter out deleted users
+    const investments = await this.investmentModel.aggregate([
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      {
+        $unwind: '$user'
+      },
+      {
+        $lookup: {
+          from: 'investmentplans',
+          localField: 'planId',
+          foreignField: '_id',
+          as: 'plan'
+        }
+      },
+      {
+        $unwind: '$plan'
+      },
+      {
+        $match: {
+          'user.isActive': true, // Only include investments of active users
+          ...filter
+        }
+      },
+      {
+        $sort: { createdAt: -1 }
+      },
+      {
+        $skip: skip
+      },
+      {
+        $limit: parseInt(limit)
+      },
+      {
+        $project: {
+          _id: 1,
+          userId: 1,
+          planId: 1,
+          amount: 1,
+          currency: 1,
+          status: 1,
+          startDate: 1,
+          endDate: 1,
+          dailyRoi: 1,
+          totalRoi: 1,
+          earnedAmount: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          user: {
+            _id: '$user._id',
+            firstName: '$user.firstName',
+            lastName: '$user.lastName',
+            email: '$user.email'
+          },
+          plan: {
+            _id: '$plan._id',
+            name: '$plan.name'
+          }
+        }
+      }
+    ]);
 
-    const total = await this.investmentModel.countDocuments(filter);
+    // Get total count for pagination
+    const totalResult = await this.investmentModel.aggregate([
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      {
+        $unwind: '$user'
+      },
+      {
+        $match: {
+          'user.isActive': true,
+          ...filter
+        }
+      },
+      {
+        $count: 'total'
+      }
+    ]);
 
-    // Map to return user and plan fields
-    const mappedInvestments = investments.map(inv => ({
-      ...inv.toObject(),
-      user: inv.userId,
-      plan: inv.planId,
-    }));
+    const total = totalResult[0]?.total || 0;
 
     return {
-      investments: mappedInvestments,
+      investments,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -325,22 +441,146 @@ export class AdminService {
   }
 
   async getInvestmentsStats() {
+    // Use aggregation to get stats only for active users
     const [totalInvestments, totalAmount, totalEarnings, activeInvestments, completedInvestments, pendingInvestments] = await Promise.all([
-      this.investmentModel.countDocuments(),
-      this.investmentModel.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }]),
-      this.investmentModel.aggregate([{ $group: { _id: null, total: { $sum: '$earnedAmount' } } }]),
-      this.investmentModel.countDocuments({ status: 'active' }),
-      this.investmentModel.countDocuments({ status: 'completed' }),
-      this.investmentModel.countDocuments({ status: 'pending' }),
+      this.investmentModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true
+          }
+        },
+        {
+          $count: 'total'
+        }
+      ]),
+      this.investmentModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true
+          }
+        },
+        {
+          $group: { _id: null, total: { $sum: '$amount' } }
+        }
+      ]),
+      this.investmentModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true
+          }
+        },
+        {
+          $group: { _id: null, total: { $sum: '$earnedAmount' } }
+        }
+      ]),
+      this.investmentModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true,
+            status: 'active'
+          }
+        },
+        {
+          $count: 'total'
+        }
+      ]),
+      this.investmentModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true,
+            status: 'completed'
+          }
+        },
+        {
+          $count: 'total'
+        }
+      ]),
+      this.investmentModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true,
+            status: 'pending'
+          }
+        },
+        {
+          $count: 'total'
+        }
+      ]),
     ]);
 
     return {
-      totalInvestments,
+      totalInvestments: totalInvestments[0]?.total || 0,
       totalAmount: totalAmount[0]?.total || 0,
       totalEarnings: totalEarnings[0]?.total || 0,
-      activeInvestments,
-      completedInvestments,
-      pendingInvestments,
+      activeInvestments: activeInvestments[0]?.total || 0,
+      completedInvestments: completedInvestments[0]?.total || 0,
+      pendingInvestments: pendingInvestments[0]?.total || 0,
     };
   }
 
@@ -373,23 +613,89 @@ export class AdminService {
     }
 
     const skip = (page - 1) * limit;
-    const withdrawals = await this.withdrawalModel
-      .find(filter)
-      .populate('userId', 'firstName lastName email')
-      .skip(skip)
-      .limit(parseInt(limit))
-      .sort({ createdAt: -1 });
+    
+    // Use aggregation to join with users and filter out deleted users
+    const withdrawals = await this.withdrawalModel.aggregate([
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      {
+        $unwind: '$user'
+      },
+      {
+        $match: {
+          'user.isActive': true, // Only include withdrawals of active users
+          ...filter
+        }
+      },
+      {
+        $sort: { createdAt: -1 }
+      },
+      {
+        $skip: skip
+      },
+      {
+        $limit: parseInt(limit)
+      },
+      {
+        $project: {
+          _id: 1,
+          userId: 1,
+          amount: 1,
+          currency: 1,
+          status: 1,
+          reference: 1,
+          bankDetails: 1,
+          fee: 1,
+          netAmount: 1,
+          processedAt: 1,
+          failedAt: 1,
+          failureReason: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          user: {
+            _id: '$user._id',
+            firstName: '$user.firstName',
+            lastName: '$user.lastName',
+            email: '$user.email'
+          }
+        }
+      }
+    ]);
 
-    const total = await this.withdrawalModel.countDocuments(filter);
+    // Get total count for pagination
+    const totalResult = await this.withdrawalModel.aggregate([
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      {
+        $unwind: '$user'
+      },
+      {
+        $match: {
+          'user.isActive': true,
+          ...filter
+        }
+      },
+      {
+        $count: 'total'
+      }
+    ]);
 
-    // Map to return user field
-    const mappedWithdrawals = withdrawals.map(w => ({
-      ...w.toObject(),
-      user: w.userId,
-    }));
+    const total = totalResult[0]?.total || 0;
 
     return {
-      withdrawals: mappedWithdrawals,
+      withdrawals,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -400,22 +706,146 @@ export class AdminService {
   }
 
   async getWithdrawalsStats() {
+    // Use aggregation to get stats only for active users
     const [totalWithdrawals, totalAmount, totalFees, pendingWithdrawals, completedWithdrawals, failedWithdrawals] = await Promise.all([
-      this.withdrawalModel.countDocuments(),
-      this.withdrawalModel.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }]),
-      this.withdrawalModel.aggregate([{ $group: { _id: null, total: { $sum: '$fee' } } }]),
-      this.withdrawalModel.countDocuments({ status: 'pending' }),
-      this.withdrawalModel.countDocuments({ status: 'completed' }),
-      this.withdrawalModel.countDocuments({ status: 'failed' }),
+      this.withdrawalModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true
+          }
+        },
+        {
+          $count: 'total'
+        }
+      ]),
+      this.withdrawalModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true
+          }
+        },
+        {
+          $group: { _id: null, total: { $sum: '$amount' } }
+        }
+      ]),
+      this.withdrawalModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true
+          }
+        },
+        {
+          $group: { _id: null, total: { $sum: '$fee' } }
+        }
+      ]),
+      this.withdrawalModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true,
+            status: 'pending'
+          }
+        },
+        {
+          $count: 'total'
+        }
+      ]),
+      this.withdrawalModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true,
+            status: 'completed'
+          }
+        },
+        {
+          $count: 'total'
+        }
+      ]),
+      this.withdrawalModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true,
+            status: 'failed'
+          }
+        },
+        {
+          $count: 'total'
+        }
+      ]),
     ]);
 
     return {
-      totalWithdrawals,
+      totalWithdrawals: totalWithdrawals[0]?.total || 0,
       totalAmount: totalAmount[0]?.total || 0,
       totalFees: totalFees[0]?.total || 0,
-      pendingWithdrawals,
-      completedWithdrawals,
-      failedWithdrawals,
+      pendingWithdrawals: pendingWithdrawals[0]?.total || 0,
+      completedWithdrawals: completedWithdrawals[0]?.total || 0,
+      failedWithdrawals: failedWithdrawals[0]?.total || 0,
     };
   }
 
@@ -506,23 +936,90 @@ export class AdminService {
     }
 
     const skip = (page - 1) * limit;
-    const wallets = await this.walletModel
-      .find(filter)
-      .populate('userId', 'firstName lastName email')
-      .skip(skip)
-      .limit(parseInt(limit))
-      .sort({ createdAt: -1 });
+    
+    // Use aggregation to join with users and filter out deleted users
+    const wallets = await this.walletModel.aggregate([
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      {
+        $unwind: '$user'
+      },
+      {
+        $match: {
+          'user.isActive': true, // Only include wallets of active users
+          ...filter
+        }
+      },
+      {
+        $sort: { createdAt: -1 }
+      },
+      {
+        $skip: skip
+      },
+      {
+        $limit: parseInt(limit)
+      },
+      {
+        $project: {
+          _id: 1,
+          userId: 1,
+          type: 1,
+          nairaBalance: 1,
+          usdtBalance: 1,
+          totalDeposits: 1,
+          totalWithdrawals: 1,
+          totalInvestments: 1,
+          totalEarnings: 1,
+          totalBonuses: 1,
+          totalReferralEarnings: 1,
+          lastTransactionDate: 1,
+          status: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          user: {
+            _id: '$user._id',
+            firstName: '$user.firstName',
+            lastName: '$user.lastName',
+            email: '$user.email'
+          }
+        }
+      }
+    ]);
 
-    const total = await this.walletModel.countDocuments(filter);
+    // Get total count for pagination
+    const totalResult = await this.walletModel.aggregate([
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      {
+        $unwind: '$user'
+      },
+      {
+        $match: {
+          'user.isActive': true,
+          ...filter
+        }
+      },
+      {
+        $count: 'total'
+      }
+    ]);
 
-    // Map to return user field
-    const mappedWallets = wallets.map(w => ({
-      ...w.toObject(),
-      user: w.userId,
-    }));
+    const total = totalResult[0]?.total || 0;
 
     return {
-      wallets: mappedWallets,
+      wallets,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -533,9 +1030,46 @@ export class AdminService {
   }
 
   async getWalletsStats() {
+    // Use aggregation to get stats only for active users
     const [totalWallets, totalBalance, totalDeposits, totalWithdrawals, activeWallets, suspendedWallets] = await Promise.all([
-      this.walletModel.countDocuments(),
       this.walletModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true
+          }
+        },
+        {
+          $count: 'total'
+        }
+      ]),
+      this.walletModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true
+          }
+        },
         {
           $group: {
             _id: null,
@@ -544,22 +1078,104 @@ export class AdminService {
           },
         },
       ]),
-      this.walletModel.aggregate([{ $group: { _id: null, total: { $sum: '$totalDeposits' } } }]),
-      this.walletModel.aggregate([{ $group: { _id: null, total: { $sum: '$totalWithdrawals' } } }]),
-      this.walletModel.countDocuments({ status: 'active' }),
-      this.walletModel.countDocuments({ status: 'suspended' }),
+      this.walletModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true
+          }
+        },
+        {
+          $group: { _id: null, total: { $sum: '$totalDeposits' } }
+        }
+      ]),
+      this.walletModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true
+          }
+        },
+        {
+          $group: { _id: null, total: { $sum: '$totalWithdrawals' } }
+        }
+      ]),
+      this.walletModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true,
+            status: 'active'
+          }
+        },
+        {
+          $count: 'total'
+        }
+      ]),
+      this.walletModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.isActive': true,
+            status: 'suspended'
+          }
+        },
+        {
+          $count: 'total'
+        }
+      ]),
     ]);
 
     return {
-      totalWallets,
+      totalWallets: totalWallets[0]?.total || 0,
       totalBalance: {
         naira: totalBalance[0]?.naira || 0,
         usdt: totalBalance[0]?.usdt || 0,
       },
       totalDeposits: totalDeposits[0]?.total || 0,
       totalWithdrawals: totalWithdrawals[0]?.total || 0,
-      activeWallets,
-      suspendedWallets,
+      activeWallets: activeWallets[0]?.total || 0,
+      suspendedWallets: suspendedWallets[0]?.total || 0,
     };
   }
 
@@ -1669,5 +2285,225 @@ export class AdminService {
       throw new NotFoundException('Notice not found');
     }
     return notice;
+  }
+
+  // Cleanup orphaned data
+  async cleanupOrphanedData() {
+    const session = await this.userModel.db.startSession();
+    session.startTransaction();
+
+    try {
+      // Find wallets that belong to deleted users
+      const orphanedWallets = await this.walletModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $match: {
+            $or: [
+              { user: { $size: 0 } }, // No user found
+              { 'user.isActive': false } // User is inactive/deleted
+            ]
+          }
+        }
+      ]);
+
+      const orphanedWalletIds = orphanedWallets.map(w => w._id);
+
+      // Delete orphaned wallets
+      if (orphanedWalletIds.length > 0) {
+        await this.walletModel.deleteMany({ _id: { $in: orphanedWalletIds } }, { session });
+      }
+
+      // Find investments that belong to deleted users
+      const orphanedInvestments = await this.investmentModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $match: {
+            $or: [
+              { user: { $size: 0 } },
+              { 'user.isActive': false }
+            ]
+          }
+        }
+      ]);
+
+      const orphanedInvestmentIds = orphanedInvestments.map(i => i._id);
+
+      // Delete orphaned investments
+      if (orphanedInvestmentIds.length > 0) {
+        await this.investmentModel.deleteMany({ _id: { $in: orphanedInvestmentIds } }, { session });
+      }
+
+      // Find withdrawals that belong to deleted users
+      const orphanedWithdrawals = await this.withdrawalModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $match: {
+            $or: [
+              { user: { $size: 0 } },
+              { 'user.isActive': false }
+            ]
+          }
+        }
+      ]);
+
+      const orphanedWithdrawalIds = orphanedWithdrawals.map(w => w._id);
+
+      // Delete orphaned withdrawals
+      if (orphanedWithdrawalIds.length > 0) {
+        await this.withdrawalModel.deleteMany({ _id: { $in: orphanedWithdrawalIds } }, { session });
+      }
+
+      await session.commitTransaction();
+
+      return {
+        message: 'Orphaned data cleaned up successfully',
+        deletedWallets: orphanedWalletIds.length,
+        deletedInvestments: orphanedInvestmentIds.length,
+        deletedWithdrawals: orphanedWithdrawalIds.length,
+      };
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  // Process missing referral bonuses
+  async processMissingReferralBonuses() {
+    const session = await this.userModel.db.startSession();
+    session.startTransaction();
+
+    try {
+      // Find all investments that have referral bonuses but no corresponding referral record updates
+      const investmentsWithBonuses = await this.investmentModel.aggregate([
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        {
+          $unwind: '$user'
+        },
+        {
+          $match: {
+            'user.referredBy': { $exists: true, $ne: null },
+            'referralBonus': { $gt: 0 }
+          }
+        }
+      ]);
+
+      let processedCount = 0;
+      let totalBonusAmount = 0;
+
+      for (const investment of investmentsWithBonuses) {
+        const userId = investment.userId.toString();
+        const referrerId = investment.user.referredBy.toString();
+        const referralBonus = investment.referralBonus;
+        const currency = investment.currency;
+
+        // Check if referral record exists and needs updating
+        const referral = await this.referralModel.findOne({
+          referredUserId: new Types.ObjectId(userId)
+        });
+
+        if (referral && !referral.isActive) {
+          // Update referral record
+          await this.referralModel.findByIdAndUpdate(referral._id, {
+            isActive: true,
+            status: 'active',
+            referralBonus: referralBonus,
+            totalEarnings: referralBonus,
+            firstInvestmentAt: investment.startDate || new Date(),
+            lastActivityAt: new Date()
+          }, { session });
+
+          // Add bonus to referrer's wallet if not already added
+          const referrerWallet = await this.walletModel.findOne({
+            userId: new Types.ObjectId(referrerId)
+          });
+
+          if (referrerWallet) {
+            if (currency === 'naira') {
+              referrerWallet.nairaBalance += referralBonus;
+              referrerWallet.totalReferralEarnings += referralBonus;
+            } else {
+              referrerWallet.usdtBalance += referralBonus;
+              referrerWallet.totalReferralEarnings += referralBonus;
+            }
+            await referrerWallet.save({ session });
+          }
+
+          // Update referrer's stats
+          await this.userModel.findByIdAndUpdate(referrerId, {
+            $inc: { totalReferralEarnings: referralBonus }
+          }, { session });
+
+          // Create transaction record if it doesn't exist
+          const existingTransaction = await this.transactionModel.findOne({
+            userId: new Types.ObjectId(referrerId),
+            type: 'referral',
+            investmentId: new Types.ObjectId(investment._id.toString())
+          });
+
+          if (!existingTransaction) {
+            await this.transactionModel.create([{
+              userId: new Types.ObjectId(referrerId),
+              type: 'referral',
+              amount: referralBonus,
+              currency: currency,
+              description: `Referral bonus from ${investment.user.firstName} ${investment.user.lastName}`,
+              status: 'success',
+              investmentId: new Types.ObjectId(investment._id.toString()),
+              createdAt: new Date(),
+              updatedAt: new Date()
+            }], { session });
+          }
+
+          processedCount++;
+          totalBonusAmount += referralBonus;
+
+          console.log(`✅ Processed referral bonus for investment ${investment._id}: ${referralBonus} ${currency}`);
+        }
+      }
+
+      await session.commitTransaction();
+
+      return {
+        message: `Successfully processed ${processedCount} missing referral bonuses`,
+        processedCount,
+        totalBonusAmount,
+        currency: 'mixed'
+      };
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
   }
 } 

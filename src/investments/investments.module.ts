@@ -9,6 +9,7 @@ import { UsersModule } from '../users/users.module';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { EmailModule } from '../email/email.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { ReferralsModule } from '../referrals/referrals.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     TransactionsModule,
     EmailModule,
     NotificationsModule,
+    ReferralsModule,
   ],
   controllers: [InvestmentsController],
   providers: [InvestmentsService],

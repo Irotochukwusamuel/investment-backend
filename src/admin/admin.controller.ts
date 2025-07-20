@@ -395,4 +395,18 @@ export class AdminController {
   async updateWithdrawalPolicy(@Body() body: { roiOnly: boolean }) {
     return this.adminService.updateWithdrawalPolicy(body);
   }
+
+  @Post('process-missing-referral-bonuses')
+  @ApiOperation({ summary: 'Process missing referral bonuses (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Missing referral bonuses processed successfully' })
+  async processMissingReferralBonuses() {
+    return this.adminService.processMissingReferralBonuses();
+  }
+
+  @Post('cleanup-orphaned-data')
+  @ApiOperation({ summary: 'Clean up orphaned data (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Orphaned data cleaned up successfully' })
+  async cleanupOrphanedData() {
+    return this.adminService.cleanupOrphanedData();
+  }
 } 

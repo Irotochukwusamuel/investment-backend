@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Investment, InvestmentDocument, InvestmentStatus } from './schemas/investment.schema';
@@ -14,6 +14,8 @@ import { TransactionType, TransactionStatus } from '../transactions/schemas/tran
 import { EmailService } from '../email/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/schemas/notification.schema';
+import { ReferralsService } from '../referrals/referrals.service';
+import { Referral } from '../referrals/schemas/referral.schema';
 
 @Injectable()
 export class InvestmentsService {
@@ -25,6 +27,8 @@ export class InvestmentsService {
     private readonly transactionsService: TransactionsService,
     private readonly emailService: EmailService,
     private readonly notificationsService: NotificationsService,
+    @Inject(forwardRef(() => ReferralsService))
+    private readonly referralsService: ReferralsService,
   ) {}
 
   async createFromRequest(createInvestmentRequestDto: CreateInvestmentRequestDto, userId: string): Promise<Investment> {
@@ -122,6 +126,8 @@ export class InvestmentsService {
     // Process referral bonus if user was referred by someone
     const user = await this.usersService.findById(userId);
     if (user.referredBy && referralBonus > 0) {
+      console.log(`🎁 Processing referral bonus: ${referralBonus} ${createInvestmentRequestDto.currency} for referrer ${user.referredBy}`);
+      
       // Add referral bonus to referrer's main wallet
       await this.walletService.deposit(user.referredBy.toString(), {
         walletType: WalletType.MAIN,
@@ -132,6 +138,25 @@ export class InvestmentsService {
 
       // Update referrer's referral earnings
       await this.usersService.updateReferralStats(user.referredBy.toString(), referralBonus);
+
+      // Update referral record to mark as active and add bonus
+      let referral: Referral | null = null;
+      try {
+        referral = await this.referralsService.findByReferredUser(userId);
+        if (referral) {
+          await this.referralsService.update(referral._id.toString(), {
+            isActive: true,
+            status: 'active',
+            referralBonus: referralBonus,
+            totalEarnings: referralBonus,
+            firstInvestmentAt: new Date(),
+            lastActivityAt: new Date()
+          });
+          console.log(`✅ Updated referral record for user ${userId}`);
+        }
+      } catch (error) {
+        console.error('Failed to update referral record:', error);
+      }
 
       // Create transaction record for referral bonus
       await this.transactionsService.create({
@@ -148,9 +173,31 @@ export class InvestmentsService {
       await this.notificationsService.createBonusNotification(
         user.referredBy.toString(),
         'Referral Bonus Earned',
-        `You earned ₦${referralBonus.toLocaleString()} referral bonus from ${user.firstName} ${user.lastName}'s investment.`,
+        `You earned ${createInvestmentRequestDto.currency === 'naira' ? '₦' : '$'}${referralBonus.toLocaleString()} referral bonus from ${user.firstName} ${user.lastName}'s investment.`,
         NotificationType.SUCCESS
       );
+
+      // Send referral bonus email
+      try {
+        const referrer = await this.usersService.findById(user.referredBy.toString());
+        await this.emailService.sendReferralBonusEmail(
+          referrer.email,
+          referrer.firstName || referrer.email,
+          {
+            bonusAmount: referralBonus,
+            currency: createInvestmentRequestDto.currency,
+            referredUserName: `${user.firstName} ${user.lastName}`,
+            referredInvestmentAmount: createInvestmentRequestDto.amount,
+            bonusPercentage: plan.referralBonus,
+            dateEarned: new Date(),
+            referralId: referral?._id.toString() || 'unknown'
+          }
+        );
+      } catch (error) {
+        console.error('Failed to send referral bonus email:', error);
+      }
+    } else {
+      console.log(`ℹ️ No referral bonus: user ${userId} has no referrer or referral bonus is 0`);
     }
 
     // Create notification for successful investment
