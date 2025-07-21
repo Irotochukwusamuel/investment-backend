@@ -285,40 +285,24 @@ export class AdminService {
       throw new NotFoundException('User not found');
     }
 
-    // Start a session for transaction
-    const session = await this.userModel.db.startSession();
-    session.startTransaction();
+    // Delete all related data (no transaction/session)
+    await Promise.all([
+      // Delete user's wallets
+      this.walletModel.deleteMany({ userId: new Types.ObjectId(id) }),
+      // Delete user's investments
+      this.investmentModel.deleteMany({ userId: new Types.ObjectId(id) }),
+      // Delete user's withdrawals
+      this.withdrawalModel.deleteMany({ userId: new Types.ObjectId(id) }),
+      // Delete user's transactions
+      this.transactionModel.deleteMany({ userId: new Types.ObjectId(id) }),
+      // Delete user's notifications
+      this.notificationsService.deleteAllForUser(id),
+    ]);
 
-    try {
-      // Delete all related data
-      await Promise.all([
-        // Delete user's wallets
-        this.walletModel.deleteMany({ userId: new Types.ObjectId(id) }, { session }),
-        
-        // Delete user's investments
-        this.investmentModel.deleteMany({ userId: new Types.ObjectId(id) }, { session }),
-        
-        // Delete user's withdrawals
-        this.withdrawalModel.deleteMany({ userId: new Types.ObjectId(id) }, { session }),
-        
-        // Delete user's transactions
-        this.transactionModel.deleteMany({ userId: new Types.ObjectId(id) }, { session }),
-        
-        // Delete user's notifications
-        this.notificationsService.deleteAllForUser(id),
-      ]);
+    // Finally delete the user
+    await this.userModel.findByIdAndDelete(id);
 
-      // Finally delete the user
-      await this.userModel.findByIdAndDelete(id, { session });
-
-      await session.commitTransaction();
-      return { message: 'User and all related data deleted successfully' };
-    } catch (error) {
-      await session.abortTransaction();
-      throw error;
-    } finally {
-      session.endSession();
-    }
+    return { message: 'User and all related data deleted successfully' };
   }
 
   // Investment Management

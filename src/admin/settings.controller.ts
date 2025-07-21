@@ -19,4 +19,14 @@ export class SettingsController {
       autoPayout: platform.autoPayout ?? false,
     };
   }
+
+  // Add public endpoint for maintenance mode
+  @Get('maintenance-status')
+  async getMaintenanceStatus() {
+    const settings = await this.adminService.getSettings();
+    return {
+      maintenanceMode: settings.maintenance?.maintenanceMode ?? false,
+      maintenanceMessage: settings.maintenance?.maintenanceMessage ?? '',
+    };
+  }
 } 

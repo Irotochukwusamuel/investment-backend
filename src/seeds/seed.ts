@@ -25,9 +25,9 @@ async function bootstrap() {
       case 'reset':
         await seedsService.resetAndSeed();
         break;
-      case 'plans':
-        await seedsService.seedInvestmentPlans();
-        break;
+      // case 'plans':
+      //   await seedsService.seedInvestmentPlans();
+      //   break;
       case 'admin':
         await seedsService.seedAdminUser();
         break;
