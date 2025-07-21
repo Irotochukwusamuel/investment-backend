@@ -297,6 +297,11 @@ export class AdminService {
       this.transactionModel.deleteMany({ userId: new Types.ObjectId(id) }),
       // Delete user's notifications
       this.notificationsService.deleteAllForUser(id),
+      // Delete all referrals where user is referrer or referred
+      this.referralModel.deleteMany({ $or: [
+        { referrerId: new Types.ObjectId(id) },
+        { referredUserId: new Types.ObjectId(id) }
+      ] }),
     ]);
 
     // Finally delete the user
