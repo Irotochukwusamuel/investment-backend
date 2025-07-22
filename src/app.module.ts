@@ -19,6 +19,7 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { WithdrawalsModule } from './withdrawals/withdrawals.module';
 import { NoticeModule } from './notice/notice.module';
 import { AdminModule } from './admin/admin.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { AdminModule } from './admin/admin.module';
     WithdrawalsModule,
     NoticeModule,
     AdminModule,
+    SettingsModule,
   ],
   controllers: [AppController],
   providers: [],

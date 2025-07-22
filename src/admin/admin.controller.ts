@@ -396,6 +396,21 @@ export class AdminController {
     return this.adminService.updateWithdrawalPolicy(body);
   }
 
+  // USDT Feature Settings
+  @Get('settings/usdt-features')
+  @ApiOperation({ summary: 'Get USDT feature settings (Admin only)' })
+  @ApiResponse({ status: 200, description: 'USDT feature settings retrieved successfully' })
+  async getUsdtFeatureSettings() {
+    return this.adminService.getUsdtFeatureSettings();
+  }
+
+  @Patch('settings/usdt-features')
+  @ApiOperation({ summary: 'Update USDT feature settings (Admin only)' })
+  @ApiResponse({ status: 200, description: 'USDT feature settings updated successfully' })
+  async updateUsdtFeatureSettings(@Body() body: { usdtWithdrawalEnabled?: boolean; usdtInvestmentEnabled?: boolean }) {
+    return this.adminService.updateUsdtFeatureSettings(body);
+  }
+
   @Post('process-missing-referral-bonuses')
   @ApiOperation({ summary: 'Process missing referral bonuses (Admin only)' })
   @ApiResponse({ status: 200, description: 'Missing referral bonuses processed successfully' })

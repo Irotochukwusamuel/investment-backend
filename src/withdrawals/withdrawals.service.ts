@@ -28,6 +28,14 @@ export class WithdrawalsService {
   async createWithdrawal(userId: string, createWithdrawalDto: CreateWithdrawalDto) {
     const { amount, currency, notes } = createWithdrawalDto;
 
+    // Check USDT withdrawal settings
+    if (currency === 'usdt') {
+      const usdtSettings = await this.adminService.getUsdtFeatureSettings();
+      if (!usdtSettings.usdtWithdrawalEnabled) {
+        throw new BadRequestException('USDT withdrawals are currently disabled. Please try again later.');
+      }
+    }
+
     // Fetch withdrawal settings
     const settings = await this.adminService.getWithdrawalSettings();
     if (amount < settings.minWithdrawalAmount || amount > settings.maxWithdrawalAmount) {

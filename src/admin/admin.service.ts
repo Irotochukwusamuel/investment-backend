@@ -1579,6 +1579,9 @@ export class AdminService {
       maintenance: { maintenanceMode: false, maintenanceMessage: '' },
       autoPayout: false,
       bonusWithdrawalPeriod: 15, // Days required before bonus can be withdrawn
+      // USDT Feature Toggles
+      usdtWithdrawalEnabled: false, // USDT withdrawals disabled by default
+      usdtInvestmentEnabled: false, // USDT investments disabled by default
     };
   }
 
@@ -2050,29 +2053,70 @@ export class AdminService {
   // Withdrawal Settings
   async getWithdrawalSettings() {
     const doc = await this.settingsModel.findOne({ key: 'platform' });
-    if (doc) return  {
-      minWithdrawalAmount: doc.value.withdrawalLimits.minAmount,
-      maxWithdrawalAmount: doc.value.withdrawalLimits.maxAmount,
-      withdrawalFee: doc.value.fees.withdrawalFee,
-      processingTime: doc.value.processingTime,
-      autoPayout: doc.value.autoPayout,
-    };
-    return {
+    console.log('🔍 getWithdrawalSettings - Raw DB document:', doc);
+    
+    if (doc) {
+      const result = {
+        minWithdrawalAmount: doc.value.withdrawalLimits.minAmount,
+        maxWithdrawalAmount: doc.value.withdrawalLimits.maxAmount,
+        withdrawalFee: doc.value.fees.withdrawalFee,
+        processingTime: doc.value.processingTime,
+        autoPayout: doc.value.autoPayout,
+      };
+      console.log('🔍 getWithdrawalSettings - Returning:', result);
+      return result;
+    }
+    
+    const defaultResult = {
       minWithdrawalAmount: 1000,
       maxWithdrawalAmount: 1000000,
       withdrawalFee: 2.5,
       processingTime: 24,
       autoPayout: false,
     };
+    console.log('🔍 getWithdrawalSettings - Using defaults:', defaultResult);
+    return defaultResult;
   }
 
   async updateWithdrawalSettings(settingsData: any) {
+    console.log('🔧 updateWithdrawalSettings - Input data:', settingsData);
+    
+    const doc = await this.settingsModel.findOne({ key: 'platform' });
+    console.log('🔧 updateWithdrawalSettings - Current DB document:', doc);
+    
+    let value = doc?.value || {};
+    
+    // Update only the withdrawal-related settings
+    value.withdrawalLimits = {
+      minAmount: settingsData.minWithdrawalAmount || value.withdrawalLimits?.minAmount || 1000,
+      maxAmount: settingsData.maxWithdrawalAmount || value.withdrawalLimits?.maxAmount || 1000000,
+    };
+    value.fees = {
+      ...value.fees,
+      withdrawalFee: settingsData.withdrawalFee || value.fees?.withdrawalFee || 2.5,
+    };
+    value.autoPayout = settingsData.autoPayout !== undefined ? settingsData.autoPayout : value.autoPayout;
+    value.processingTime = settingsData.processingTime || value.processingTime || 24;
+    
+    console.log('🔧 updateWithdrawalSettings - Updated value:', value);
+    
     await this.settingsModel.updateOne(
-      { key: 'withdrawal' },
-      { value: settingsData },
+      { key: 'platform' },
+      { value },
       { upsert: true }
     );
-    return settingsData;
+    
+    // Return the updated withdrawal settings
+    const result = {
+      minWithdrawalAmount: value.withdrawalLimits.minAmount,
+      maxWithdrawalAmount: value.withdrawalLimits.maxAmount,
+      withdrawalFee: value.fees.withdrawalFee,
+      processingTime: value.processingTime,
+      autoPayout: value.autoPayout,
+    };
+    
+    console.log('🔧 updateWithdrawalSettings - Returning:', result);
+    return result;
   }
 
   // Withdrawal Policy (ROI Only toggle)
@@ -2531,5 +2575,33 @@ export class AdminService {
     } catch (error) {
       console.error('Error notifying users about bonus withdrawal period change:', error);
     }
+  }
+
+  // USDT Feature Settings
+  async getUsdtFeatureSettings() {
+    const doc = await this.settingsModel.findOne({ key: 'platform' });
+    if (doc && doc.value) {
+      return {
+        usdtWithdrawalEnabled: doc.value.usdtWithdrawalEnabled ?? false,
+        usdtInvestmentEnabled: doc.value.usdtInvestmentEnabled ?? false,
+      };
+    }
+    // Default: both disabled
+    return {
+      usdtWithdrawalEnabled: false,
+      usdtInvestmentEnabled: false,
+    };
+  }
+
+  async updateUsdtFeatureSettings(settings: { usdtWithdrawalEnabled?: boolean; usdtInvestmentEnabled?: boolean }) {
+    const doc = await this.settingsModel.findOne({ key: 'platform' });
+    let value = doc?.value || {};
+    value = { ...value, ...settings };
+    await this.settingsModel.updateOne(
+      { key: 'platform' },
+      { value },
+      { upsert: true }
+    );
+    return value;
   }
 } 

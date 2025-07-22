@@ -40,6 +40,15 @@ export class InvestmentsService {
       throw new NotFoundException('Investment plan not found');
     }
 
+    // Check USDT investment settings
+    if (plan.currency === 'usdt') {
+      const platformSettings = await this.settingsModel.findOne({ key: 'platform' });
+      const usdtInvestmentEnabled = platformSettings?.value?.usdtInvestmentEnabled ?? false;
+      if (!usdtInvestmentEnabled) {
+        throw new BadRequestException('USDT investments are currently disabled. Please try again later.');
+      }
+    }
+
     // Check if user already has 3 active investments (maximum limit)
     const activeInvestments = await this.investmentModel.countDocuments({
       userId: new Types.ObjectId(userId),

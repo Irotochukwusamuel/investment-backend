@@ -1,40 +1,23 @@
 import { Controller, Get } from '@nestjs/common';
-import { AdminService } from './admin.service';
+import { SettingsService } from '../settings/settings.service';
 
 @Controller('settings')
 export class SettingsController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(private readonly settingsService: SettingsService) {}
 
   @Get('withdrawal')
   async getWithdrawalSettings() {
-    // Get platform settings
-    const platform = await this.adminService.getSettings();
-
-    console.log(platform)
-    return {
-      minWithdrawalAmount: platform.withdrawalLimits?.minAmount ?? 1000,
-      maxWithdrawalAmount: platform.withdrawalLimits?.maxAmount ?? 1000000,
-      withdrawalFee: platform.fees?.withdrawalFee ?? 2.5,
-      processingTime: platform.processingTime ?? 24,
-      autoPayout: platform.autoPayout ?? false,
-    };
+    return this.settingsService.getWithdrawalSettings();
   }
 
   @Get('bonus-withdrawal-period')
   async getBonusWithdrawalPeriod() {
-    const settings = await this.adminService.getSettings();
-    return {
-      bonusWithdrawalPeriod: settings.bonusWithdrawalPeriod ?? 15,
-    };
+    return this.settingsService.getBonusWithdrawalPeriod();
   }
 
   // Add public endpoint for maintenance mode
   @Get('maintenance-status')
   async getMaintenanceStatus() {
-    const settings = await this.adminService.getSettings();
-    return {
-      maintenanceMode: settings.maintenance?.maintenanceMode ?? false,
-      maintenanceMessage: settings.maintenance?.maintenanceMessage ?? '',
-    };
+    return this.settingsService.getMaintenanceStatus();
   }
 } 

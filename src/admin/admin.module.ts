@@ -20,7 +20,6 @@ import { NoticeModule } from '../notice/notice.module';
 import { EmailModule } from '../email/email.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { TransactionsModule } from '../transactions/transactions.module';
-import { SettingsController } from './settings.controller';
 
 @Module({
   imports: [
@@ -45,7 +44,7 @@ import { SettingsController } from './settings.controller';
     NotificationsModule,
     TransactionsModule,
   ],
-  controllers: [AdminController, SettingsController],
+  controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],
 })
