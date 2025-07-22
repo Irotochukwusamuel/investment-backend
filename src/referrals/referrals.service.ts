@@ -160,13 +160,32 @@ export class ReferralsService {
   }
 
   async updateReferralStats(referredUserId: string): Promise<void> {
-    const referral = await this.referralModel.findOne({
+    let referral = await this.referralModel.findOne({
       referredUserId: new Types.ObjectId(referredUserId)
     });
 
+    // If no referral record but user has referredBy, create it
     if (!referral) {
-      return; // No referral relationship
+      const user = await this.userModel.findById(referredUserId);
+      if (user && user.referredBy) {
+        // Create referral record
+        await this.create({
+          referrerId: user.referredBy.toString(),
+          referredUserId: user._id.toString(),
+          referralCode: user.referralCode || '',
+          isActive: false,
+          status: 'pending',
+        });
+        // Re-fetch as Document
+        referral = await this.referralModel.findOne({
+          referredUserId: new Types.ObjectId(referredUserId)
+        });
+      } else {
+        // No referral relationship, nothing to update
+        return;
+      }
     }
+    if (!referral) return;
 
     // Get user's investment statistics
     const [activeInvestments, totalEarnings] = await Promise.all([
