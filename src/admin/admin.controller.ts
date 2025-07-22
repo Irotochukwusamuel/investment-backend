@@ -424,4 +424,11 @@ export class AdminController {
   async cleanupOrphanedData() {
     return this.adminService.cleanupOrphanedData();
   }
+
+  @Post('referrals/fix-all-stats')
+  @ApiOperation({ summary: 'One-time fix: update referral stats for all users' })
+  @ApiResponse({ status: 200, description: 'Referral stats updated for all users' })
+  async fixAllReferralStats() {
+    return this.adminService.updateAllReferralStats();
+  }
 } 

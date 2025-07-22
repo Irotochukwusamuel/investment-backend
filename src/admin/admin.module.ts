@@ -20,6 +20,7 @@ import { NoticeModule } from '../notice/notice.module';
 import { EmailModule } from '../email/email.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { TransactionsModule } from '../transactions/transactions.module';
+import { ReferralsModule } from '../referrals/referrals.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { TransactionsModule } from '../transactions/transactions.module';
     EmailModule,
     NotificationsModule,
     TransactionsModule,
+    forwardRef(() => ReferralsModule),
   ],
   controllers: [AdminController],
   providers: [AdminService],

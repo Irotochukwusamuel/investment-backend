@@ -22,6 +22,7 @@ import { NotificationType, NotificationCategory } from '../notifications/schemas
 import { TransactionsService } from '../transactions/transactions.service';
 import { Transaction, TransactionDocument } from '../transactions/schemas/transaction.schema';
 import { Referral, ReferralDocument } from '../referrals/schemas/referral.schema';
+import { ReferralsService } from '../referrals/referrals.service';
 
 @Injectable()
 export class AdminService {
@@ -44,6 +45,7 @@ export class AdminService {
     private readonly emailService: EmailService,
     private readonly notificationsService: NotificationsService,
     private readonly transactionsService: TransactionsService,
+    private readonly referralsService: ReferralsService,
   ) {}
 
   // Dashboard Stats
@@ -2603,5 +2605,21 @@ export class AdminService {
       { upsert: true }
     );
     return value;
+  }
+
+  // One-time fix: update referral stats for all users
+  async updateAllReferralStats(): Promise<{ updated: number }> {
+    const allUsers = await this.userModel.find({});
+    let updated = 0;
+    for (const user of allUsers) {
+      try {
+        await this.referralsService.updateReferralStats(user._id.toString());
+        updated++;
+      } catch (e) {
+        // Log and continue
+        console.error(`Failed to update referral stats for user ${user._id}:`, e.message);
+      }
+    }
+    return { updated };
   }
 } 
