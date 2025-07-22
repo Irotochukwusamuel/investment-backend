@@ -1578,6 +1578,7 @@ export class AdminService {
       notifications: { emailNotifications: true, smsNotifications: false, pushNotifications: true },
       maintenance: { maintenanceMode: false, maintenanceMessage: '' },
       autoPayout: false,
+      bonusWithdrawalPeriod: 15, // Days required before bonus can be withdrawn
     };
   }
 
@@ -1660,10 +1661,13 @@ export class AdminService {
       }
     }
 
-    // Validate security settings
-    if (settingsData.security) {
-      if (settingsData.security.sessionTimeout < 1 || settingsData.security.sessionTimeout > 168) {
-        throw new BadRequestException('Session timeout must be between 1 and 168 hours');
+    // Validate bonus withdrawal period
+    if (settingsData.bonusWithdrawalPeriod !== undefined) {
+      if (settingsData.bonusWithdrawalPeriod < 0) {
+        throw new BadRequestException('Bonus withdrawal period cannot be negative');
+      }
+      if (settingsData.bonusWithdrawalPeriod > 365) {
+        throw new BadRequestException('Bonus withdrawal period cannot exceed 365 days');
       }
     }
   }
@@ -1705,6 +1709,12 @@ export class AdminService {
       await this.notifyUsersAboutAutoPayoutChange(newSettings.autoPayout);
     }
 
+    // Check for bonus withdrawal period changes
+    if (oldSettings?.bonusWithdrawalPeriod !== newSettings?.bonusWithdrawalPeriod) {
+      changes.push(`Bonus withdrawal period changed from ${oldSettings?.bonusWithdrawalPeriod || 15} days to ${newSettings?.bonusWithdrawalPeriod || 15} days`);
+      await this.notifyUsersAboutBonusWithdrawalPeriodChange(newSettings.bonusWithdrawalPeriod);
+    }
+
     // Check for maintenance mode changes
     if (JSON.stringify(oldSettings?.maintenance) !== JSON.stringify(newSettings?.maintenance)) {
       changes.push('Maintenance mode settings updated');
@@ -1723,6 +1733,8 @@ export class AdminService {
       // Log the changes instead of creating an admin notification
       console.log('Platform settings updated:', changes.join(', '));
     }
+
+    return changes;
   }
 
   /**
@@ -2493,6 +2505,31 @@ export class AdminService {
       throw error;
     } finally {
       session.endSession();
+    }
+  }
+
+  /**
+   * Notify users about bonus withdrawal period changes
+   */
+  private async notifyUsersAboutBonusWithdrawalPeriodChange(newPeriod: number) {
+    try {
+      // Get all active users
+      const activeUsers = await this.userModel.find({ isActive: true }).select('email firstName');
+      
+      // Send notification to all users about the change
+      for (const user of activeUsers) {
+        await this.notificationsService.create({
+          userId: user._id,
+          type: NotificationType.INFO,
+          category: NotificationCategory.SYSTEM,
+          title: 'Bonus Withdrawal Period Updated',
+          message: `The bonus withdrawal period has been updated to ${newPeriod} days. Please check your dashboard for the new requirements.`
+        });
+      }
+      
+      console.log(`Notified ${activeUsers.length} users about bonus withdrawal period change to ${newPeriod} days`);
+    } catch (error) {
+      console.error('Error notifying users about bonus withdrawal period change:', error);
     }
   }
 } 

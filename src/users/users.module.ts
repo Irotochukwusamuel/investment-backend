@@ -5,6 +5,7 @@ import { UsersController } from './users.controller';
 import { User, UserSchema } from './schemas/user.schema';
 import { BankDetails, BankDetailsSchema } from './schemas/bank-details.schema';
 import { Investment, InvestmentSchema } from '../investments/schemas/investment.schema';
+import { Settings, SettingsSchema } from '../schemas/settings.schema';
 import { EmailModule } from '../email/email.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { ReferralsModule } from '../referrals/referrals.module';
@@ -15,6 +16,7 @@ import { ReferralsModule } from '../referrals/referrals.module';
       { name: User.name, schema: UserSchema },
       { name: BankDetails.name, schema: BankDetailsSchema },
       { name: Investment.name, schema: InvestmentSchema },
+      { name: Settings.name, schema: SettingsSchema },
     ]),
     EmailModule,
     WalletModule,

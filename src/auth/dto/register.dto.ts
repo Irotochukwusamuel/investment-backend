@@ -19,9 +19,10 @@ export class RegisterDto {
   @IsString()
   lastName: string;
 
-  @ApiProperty({ description: 'User phone number' })
+  @ApiProperty({ description: 'User phone number', required: false })
   @IsString()
-  phoneNumber: string;
+  @IsOptional()
+  phoneNumber?: string;
 
   @ApiProperty({ description: 'Referral code (optional)' })
   @IsString()

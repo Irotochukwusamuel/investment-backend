@@ -16,12 +16,14 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/schemas/notification.schema';
 import { ReferralsService } from '../referrals/referrals.service';
 import { Referral } from '../referrals/schemas/referral.schema';
+import { Settings, SettingsDocument } from '../schemas/settings.schema';
 
 @Injectable()
 export class InvestmentsService {
   constructor(
     @InjectModel(Investment.name) private investmentModel: Model<InvestmentDocument>,
     @InjectModel(InvestmentPlan.name) private investmentPlanModel: Model<InvestmentPlanDocument>,
+    @InjectModel(Settings.name) private settingsModel: Model<SettingsDocument>,
     private readonly walletService: WalletService,
     private readonly usersService: UsersService,
     private readonly transactionsService: TransactionsService,
@@ -511,15 +513,27 @@ export class InvestmentsService {
     }).exec();
   }
 
-  // Handle bonus withdrawal with 15-day rule
+  // Handle bonus withdrawal with configurable period rule
   async withdrawBonus(userId: string): Promise<{ success: boolean; message: string; amount?: number }> {
     // Check if user can withdraw bonus
     const bonusStatus = await this.usersService.canWithdrawBonus(userId);
     
     if (!bonusStatus.canWithdraw) {
+      // Get bonus withdrawal period from settings for the error message
+      let BONUS_WAIT_DAYS = 15;
+      try {
+        const settings = await this.settingsModel.findOne({ key: 'platform' });
+        if (settings?.value?.bonusWithdrawalPeriod) {
+          BONUS_WAIT_DAYS = settings.value.bonusWithdrawalPeriod;
+        }
+      } catch (error) {
+        console.error('Error fetching bonus withdrawal period from settings:', error);
+        // Fallback to default 15 days
+      }
+      
       return {
         success: false,
-        message: `Bonus can only be withdrawn after 15 days. You have ${bonusStatus.daysLeft} days remaining.`
+        message: `Bonus can only be withdrawn after ${BONUS_WAIT_DAYS} days of active investment. You have ${bonusStatus.daysLeft} days remaining.`
       };
     }
 

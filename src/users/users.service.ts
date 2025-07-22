@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { User, UserDocument } from './schemas/user.schema';
 import { BankDetails, BankDetailsDocument } from './schemas/bank-details.schema';
 import { Investment, InvestmentDocument } from '../investments/schemas/investment.schema';
+import { Settings, SettingsDocument } from '../schemas/settings.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateBankDetailsDto, UpdateBankDetailsDto } from './dto/bank-details.dto';
@@ -19,6 +20,7 @@ export class UsersService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(BankDetails.name) private bankDetailsModel: Model<BankDetailsDocument>,
     @InjectModel(Investment.name) private investmentModel: Model<InvestmentDocument>,
+    @InjectModel(Settings.name) private settingsModel: Model<SettingsDocument>,
     private readonly emailService: EmailService,
     private readonly walletService: WalletService,
     @Inject(forwardRef(() => ReferralsService))
@@ -59,7 +61,7 @@ export class UsersService {
     return referrer;
   }
 
-  // Check if user can withdraw bonus (15-day rule)
+  // Check if user can withdraw bonus (configurable period rule)
   async canWithdrawBonus(userId: string): Promise<{ canWithdraw: boolean; daysLeft: number; nextWithdrawalDate?: Date }> {
     const user = await this.userModel.findById(userId);
     if (!user) {
@@ -67,33 +69,36 @@ export class UsersService {
     }
 
     const now = new Date();
-    const BONUS_WAIT_DAYS = 15;
+    
+    // Get bonus withdrawal period from settings (default to 15 days)
+    let BONUS_WAIT_DAYS = 15;
+    try {
+      const settings = await this.settingsModel.findOne({ key: 'platform' });
+      if (settings?.value?.bonusWithdrawalPeriod) {
+        BONUS_WAIT_DAYS = settings.value.bonusWithdrawalPeriod;
+      }
+    } catch (error) {
+      console.error('Error fetching bonus withdrawal period from settings:', error);
+      // Fallback to default 15 days
+    }
 
     // If user has never had an active investment, they can't withdraw
     if (!user.firstActiveInvestmentDate) {
       return { canWithdraw: false, daysLeft: BONUS_WAIT_DAYS };
     }
 
-    let referenceDate: Date;
+    // Check if user has already completed their first period
+    const daysSinceFirstInvestment = Math.floor((now.getTime() - user.firstActiveInvestmentDate.getTime()) / (1000 * 60 * 60 * 24));
     
-    if (!user.lastBonusWithdrawalDate) {
-      // First withdrawal - use first active investment date
-      referenceDate = user.firstActiveInvestmentDate;
-    } else {
-      // Subsequent withdrawals - use last withdrawal date
-      referenceDate = user.lastBonusWithdrawalDate;
+    // If user has never withdrawn bonus and hasn't completed the required period, they need to wait
+    if (!user.lastBonusWithdrawalDate && daysSinceFirstInvestment < BONUS_WAIT_DAYS) {
+      const daysLeft = BONUS_WAIT_DAYS - daysSinceFirstInvestment;
+      const nextWithdrawalDate = new Date(user.firstActiveInvestmentDate.getTime() + (BONUS_WAIT_DAYS * 24 * 60 * 60 * 1000));
+      return { canWithdraw: false, daysLeft, nextWithdrawalDate };
     }
 
-    const daysSinceReference = Math.floor((now.getTime() - referenceDate.getTime()) / (1000 * 60 * 60 * 24));
-    const daysLeft = Math.max(0, BONUS_WAIT_DAYS - daysSinceReference);
-    const canWithdraw = daysLeft <= 0;
-
-    let nextWithdrawalDate: Date | undefined;
-    if (!canWithdraw) {
-      nextWithdrawalDate = new Date(referenceDate.getTime() + (BONUS_WAIT_DAYS * 24 * 60 * 60 * 1000));
-    }
-
-    return { canWithdraw, daysLeft, nextWithdrawalDate };
+    // If user has completed the initial period OR has already withdrawn before, they can withdraw anytime
+    return { canWithdraw: true, daysLeft: 0 };
   }
 
   // Record bonus withdrawal

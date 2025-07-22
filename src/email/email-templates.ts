@@ -188,7 +188,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Expected Total ROI:</span>
-                  <span class="detail-value">${data.expectedTotalRoi}%</span>
+                  <span class="detail-value">${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.expectedTotalRoi.toLocaleString()}</span>
                 </div>
               </div>
               

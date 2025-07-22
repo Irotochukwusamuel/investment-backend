@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { AdminService } from './admin.service';
 
-@Controller('api/settings')
+@Controller('settings')
 export class SettingsController {
   constructor(private readonly adminService: AdminService) {}
 
@@ -17,6 +17,14 @@ export class SettingsController {
       withdrawalFee: platform.fees?.withdrawalFee ?? 2.5,
       processingTime: platform.processingTime ?? 24,
       autoPayout: platform.autoPayout ?? false,
+    };
+  }
+
+  @Get('bonus-withdrawal-period')
+  async getBonusWithdrawalPeriod() {
+    const settings = await this.adminService.getSettings();
+    return {
+      bonusWithdrawalPeriod: settings.bonusWithdrawalPeriod ?? 15,
     };
   }
 

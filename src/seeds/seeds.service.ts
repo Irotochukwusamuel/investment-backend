@@ -419,6 +419,7 @@ export class SeedsService {
           notifications: { emailNotifications: true, smsNotifications: false, pushNotifications: true },
           maintenance: { maintenanceMode: false, maintenanceMessage: '' },
           autoPayout: false,
+          bonusWithdrawalPeriod: 15, // Days required before bonus can be withdrawn
         }
       });
       this.logger.log('Seeded default platform settings.');
