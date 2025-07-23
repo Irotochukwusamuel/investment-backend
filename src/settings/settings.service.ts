@@ -86,6 +86,8 @@ export class SettingsService {
     const settings = await this.getSettings();
     return {
       bonusWithdrawalPeriod: settings.bonusWithdrawalPeriod ?? 15,
+      bonusWithdrawalUnit: settings.bonusWithdrawalUnit ?? 'days',
+      bonusWithdrawalPeriodMs: settings.bonusWithdrawalPeriodMs ?? (15 * 24 * 60 * 60 * 1000),
     };
   }
 

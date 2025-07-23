@@ -99,9 +99,18 @@ export class InvestmentsService {
     nextRoiUpdate.setHours(nextRoiUpdate.getHours() + 1);
     nextRoiUpdate.setMinutes(0, 0, 0); // Set to the top of the hour
 
-    // Calculate bonuses
-    const welcomeBonus = (createInvestmentRequestDto.amount * plan.welcomeBonus) / 100;
-    const referralBonus = (createInvestmentRequestDto.amount * plan.referralBonus) / 100;
+    // Get user data for notifications and emails
+    const user = await this.usersService.findById(userId);
+
+    // Check if this is the user's first investment (for welcome bonus)
+    const isFirstInvestment = await this.isUserFirstInvestment(userId);
+    
+    // Check if this is the referred user's first investment (for referral bonus)
+    const isReferredUserFirstInvestment = user.referredBy ? await this.isReferredUserFirstInvestment(userId) : false;
+
+    // Calculate bonuses - only on first investment
+    const welcomeBonus = isFirstInvestment ? (createInvestmentRequestDto.amount * plan.welcomeBonus) / 100 : 0;
+    const referralBonus = isReferredUserFirstInvestment ? (createInvestmentRequestDto.amount * plan.referralBonus) / 100 : 0;
 
     // Create the full investment DTO
     const createInvestmentDto: CreateInvestmentDto = {
@@ -123,6 +132,9 @@ export class InvestmentsService {
     // Create the investment
     const investment = await this.create(createInvestmentDto, userId);
 
+    // Return the populated investment with plan data
+    const populatedInvestment = await this.findOne(investment._id.toString());
+
     // Set first active investment date for bonus withdrawal tracking
     await this.usersService.setFirstActiveInvestmentDate(userId);
 
@@ -134,17 +146,67 @@ export class InvestmentsService {
       description: `Investment in ${plan.name}`,
     });
 
-    // Process referral bonus if user was referred by someone
-    const user = await this.usersService.findById(userId);
-    if (user.referredBy && referralBonus > 0) {
-      console.log(`🎁 Processing referral bonus: ${referralBonus} ${createInvestmentRequestDto.currency} for referrer ${user.referredBy}`);
+    // Credit welcome bonus to user's wallet (but it will be locked until withdrawal period)
+    if (welcomeBonus > 0) {
+      console.log(`🎁 Crediting welcome bonus: ${welcomeBonus} ${createInvestmentRequestDto.currency} to user ${userId} (first investment)`);
+      
+      // Mark user as having received welcome bonus
+      await this.usersService.markWelcomeBonusGiven(userId);
+      
+      // Add welcome bonus to user's main wallet
+      await this.walletService.deposit(userId, {
+        walletType: WalletType.MAIN,
+        amount: welcomeBonus,
+        currency: createInvestmentRequestDto.currency,
+        description: `Welcome bonus from ${plan.name} investment (first investment)`,
+      });
+
+      // Create transaction record for welcome bonus
+      await this.transactionsService.create({
+        userId,
+        type: TransactionType.BONUS,
+        amount: welcomeBonus,
+        currency: createInvestmentRequestDto.currency,
+        description: `Welcome bonus from ${plan.name} investment (first investment)`,
+        status: TransactionStatus.SUCCESS,
+        investmentId: populatedInvestment._id.toString(),
+      });
+
+      // Create notification for welcome bonus
+      await this.notificationsService.createBonusNotification(
+        userId,
+        'Welcome Bonus Earned',
+        `You earned ${createInvestmentRequestDto.currency === 'naira' ? '₦' : '$'}${welcomeBonus.toLocaleString()} welcome bonus from your first ${plan.name} investment.`,
+        NotificationType.SUCCESS
+      );
+
+      // Send welcome bonus email
+      try {
+        await this.emailService.sendWelcomeBonusEmail(
+          user.email,
+          user.firstName || user.email,
+          {
+            bonusAmount: welcomeBonus,
+            currency: createInvestmentRequestDto.currency,
+            availableDate: new Date(Date.now() + (15 * 24 * 60 * 60 * 1000)), // 15 days from now
+            userId: userId,
+          }
+        );
+      } catch (error) {
+        console.error('Failed to send welcome bonus email:', error);
+      }
+    }
+
+    // Process referral bonus if user was referred by someone and this is their first investment
+    if (user.referredBy && referralBonus > 0 && isReferredUserFirstInvestment) {
+      console.log(`🎁 Processing referral bonus: ${referralBonus} ${createInvestmentRequestDto.currency} for referrer ${user.referredBy} (referred user's first investment)`);
       
       // Add referral bonus to referrer's main wallet
       await this.walletService.deposit(user.referredBy.toString(), {
         walletType: WalletType.MAIN,
         amount: referralBonus,
         currency: createInvestmentRequestDto.currency,
-        description: `Referral bonus from ${user.firstName} ${user.lastName}`,
+        description: `Referral bonus from ${user.firstName} ${user.lastName}'s first investment`,
       });
 
       // Update referrer's referral earnings
@@ -175,16 +237,16 @@ export class InvestmentsService {
         type: TransactionType.REFERRAL,
         amount: referralBonus,
         currency: createInvestmentRequestDto.currency,
-        description: `Referral bonus from ${user.firstName} ${user.lastName}`,
+        description: `Referral bonus from ${user.firstName} ${user.lastName}'s first investment`,
         status: TransactionStatus.SUCCESS,
-        investmentId: investment._id.toString(),
+        investmentId: populatedInvestment._id.toString(),
       });
 
       // Create notification for referral bonus
       await this.notificationsService.createBonusNotification(
         user.referredBy.toString(),
         'Referral Bonus Earned',
-        `You earned ${createInvestmentRequestDto.currency === 'naira' ? '₦' : '$'}${referralBonus.toLocaleString()} referral bonus from ${user.firstName} ${user.lastName}'s investment.`,
+        `You earned ${createInvestmentRequestDto.currency === 'naira' ? '₦' : '$'}${referralBonus.toLocaleString()} referral bonus from ${user.firstName} ${user.lastName}'s first investment.`,
         NotificationType.SUCCESS
       );
 
@@ -208,7 +270,7 @@ export class InvestmentsService {
         console.error('Failed to send referral bonus email:', error);
       }
     } else {
-      console.log(`ℹ️ No referral bonus: user ${userId} has no referrer or referral bonus is 0`);
+      console.log(`ℹ️ No referral bonus: user ${userId} has no referrer, referral bonus is 0, or not their first investment`);
     }
 
     // Create notification for successful investment
@@ -217,7 +279,7 @@ export class InvestmentsService {
       'Investment Created Successfully',
       `Your investment of ₦${createInvestmentRequestDto.amount.toLocaleString()} in ${plan.name} has been created successfully.`,
       NotificationType.SUCCESS,
-      investment._id
+      populatedInvestment._id
     );
 
     // Send investment confirmation email
@@ -233,7 +295,7 @@ export class InvestmentsService {
           duration: plan.duration,
           startDate: startDate,
           expectedTotalRoi: expectedReturn,
-          investmentId: investment._id.toString(),
+          investmentId: populatedInvestment._id.toString(),
         }
       );
     } catch (error) {
@@ -241,7 +303,7 @@ export class InvestmentsService {
       console.error('Failed to send investment confirmation email:', error);
     }
 
-    return investment;
+    return populatedInvestment;
   }
 
   async create(createInvestmentDto: CreateInvestmentDto, userId: string): Promise<Investment> {
@@ -530,10 +592,13 @@ export class InvestmentsService {
     if (!bonusStatus.canWithdraw) {
       // Get bonus withdrawal period from settings for the error message
       let BONUS_WAIT_DAYS = 15;
+      let BONUS_WAIT_UNIT = 'days';
+      
       try {
         const settings = await this.settingsModel.findOne({ key: 'platform' });
         if (settings?.value?.bonusWithdrawalPeriod) {
           BONUS_WAIT_DAYS = settings.value.bonusWithdrawalPeriod;
+          BONUS_WAIT_UNIT = settings.value.bonusWithdrawalUnit || 'days';
         }
       } catch (error) {
         console.error('Error fetching bonus withdrawal period from settings:', error);
@@ -542,7 +607,7 @@ export class InvestmentsService {
       
       return {
         success: false,
-        message: `Bonus can only be withdrawn after ${BONUS_WAIT_DAYS} days of active investment. You have ${bonusStatus.daysLeft} days remaining.`
+        message: `Bonus can only be withdrawn after ${BONUS_WAIT_DAYS} ${BONUS_WAIT_UNIT} of active investment. You have ${bonusStatus.timeLeft || bonusStatus.daysLeft + ' days'} remaining.`
       };
     }
 
@@ -601,5 +666,32 @@ export class InvestmentsService {
       message: `Successfully withdrawn ${totalBonus} ${currency.toUpperCase()} in bonuses.`,
       amount: totalBonus
     };
+  }
+
+  // Helper method to check if this is the user's first investment
+  private async isUserFirstInvestment(userId: string): Promise<boolean> {
+    // First check if welcome bonus has already been given
+    const user = await this.usersService.findById(userId);
+    if (user.welcomeBonusGiven) {
+      return false;
+    }
+
+    // Then check if user has any existing investments
+    const existingInvestments = await this.investmentModel.countDocuments({
+      userId: new Types.ObjectId(userId),
+      status: { $in: [InvestmentStatus.ACTIVE, InvestmentStatus.COMPLETED, InvestmentStatus.CANCELLED] }
+    });
+    
+    return existingInvestments === 0;
+  }
+
+  // Helper method to check if this is the referred user's first investment
+  private async isReferredUserFirstInvestment(userId: string): Promise<boolean> {
+    const existingInvestments = await this.investmentModel.countDocuments({
+      userId: new Types.ObjectId(userId),
+      status: { $in: [InvestmentStatus.ACTIVE, InvestmentStatus.COMPLETED, InvestmentStatus.CANCELLED] }
+    });
+    
+    return existingInvestments === 0;
   }
 } 

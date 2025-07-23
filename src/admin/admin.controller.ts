@@ -431,4 +431,11 @@ export class AdminController {
   async fixAllReferralStats() {
     return this.adminService.updateAllReferralStats();
   }
+
+  @Patch('settings/bonus-withdrawal-period')
+  @ApiOperation({ summary: 'Update bonus withdrawal period and handle existing users' })
+  @ApiResponse({ status: 200, description: 'Bonus withdrawal period updated' })
+  async updateBonusWithdrawalPeriod(@Body() body: { value: number; unit: 'hours' | 'minutes' | 'days' }) {
+    return this.adminService.updateBonusWithdrawalPeriod(body);
+  }
 } 

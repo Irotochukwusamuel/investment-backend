@@ -93,6 +93,13 @@ export class User {
 
   @Prop({ default: 0 })
   totalBonusWithdrawals: number;
+
+  // Welcome bonus tracking
+  @Prop({ default: false })
+  welcomeBonusGiven: boolean;
+
+  @Prop()
+  welcomeBonusGivenAt?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

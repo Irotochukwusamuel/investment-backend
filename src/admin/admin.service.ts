@@ -2622,4 +2622,90 @@ export class AdminService {
     }
     return { updated };
   }
+
+  // Update bonus withdrawal period and handle existing users
+  async updateBonusWithdrawalPeriod(periodData: { value: number; unit: 'hours' | 'minutes' | 'days' }): Promise<{ success: boolean; message: string; affectedUsers: number }> {
+    try {
+      // Convert period to milliseconds for consistent storage
+      let periodInMs: number;
+      switch (periodData.unit) {
+        case 'minutes':
+          periodInMs = periodData.value * 60 * 1000;
+          break;
+        case 'hours':
+          periodInMs = periodData.value * 60 * 60 * 1000;
+          break;
+        case 'days':
+          periodInMs = periodData.value * 24 * 60 * 60 * 1000;
+          break;
+        default:
+          throw new Error('Invalid time unit. Must be minutes, hours, or days.');
+      }
+
+      // Update platform settings with both value and unit
+      await this.settingsModel.findOneAndUpdate(
+        { key: 'platform' },
+        { 
+          $set: { 
+            'value.bonusWithdrawalPeriod': periodData.value,
+            'value.bonusWithdrawalUnit': periodData.unit,
+            'value.bonusWithdrawalPeriodMs': periodInMs
+          } 
+        },
+        { upsert: true }
+      );
+
+      // Find users who might be affected by this change
+      // Users who are currently in their bonus withdrawal period
+      const now = new Date();
+      const affectedUsers = await this.userModel.find({
+        firstActiveInvestmentDate: { $exists: true },
+        lastBonusWithdrawalDate: { $exists: false } // Haven't withdrawn bonus yet
+      });
+
+      let count = 0;
+      for (const user of affectedUsers) {
+        if (user.firstActiveInvestmentDate) {
+          const timeSinceFirstInvestment = now.getTime() - user.firstActiveInvestmentDate.getTime();
+          
+          // If user was previously eligible but now isn't due to increased period
+          if (timeSinceFirstInvestment >= (15 * 24 * 60 * 60 * 1000) && timeSinceFirstInvestment < periodInMs) {
+            count++;
+            
+            // Calculate remaining time in the appropriate unit
+            const remainingMs = periodInMs - timeSinceFirstInvestment;
+            let remainingTime: string;
+            if (periodData.unit === 'minutes') {
+              remainingTime = `${Math.ceil(remainingMs / (60 * 1000))} minutes`;
+            } else if (periodData.unit === 'hours') {
+              remainingTime = `${Math.ceil(remainingMs / (60 * 60 * 1000))} hours`;
+            } else {
+              remainingTime = `${Math.ceil(remainingMs / (24 * 60 * 60 * 1000))} days`;
+            }
+            
+            // Send notification to user about the change
+            try {
+              await this.notificationsService.createBonusNotification(
+                user._id.toString(),
+                'Bonus Withdrawal Period Updated',
+                `The bonus withdrawal period has been updated to ${periodData.value} ${periodData.unit}. Your bonus will be available in ${remainingTime}.`,
+                NotificationType.INFO
+              );
+            } catch (error) {
+              console.error(`Failed to send notification to user ${user._id}:`, error);
+            }
+          }
+        }
+      }
+      
+      return {
+        success: true,
+        message: `Bonus withdrawal period updated to ${periodData.value} ${periodData.unit}. ${count} users were notified of the change.`,
+        affectedUsers: count
+      };
+    } catch (error) {
+      console.error('Error updating bonus withdrawal period:', error);
+      throw error;
+    }
+  }
 } 

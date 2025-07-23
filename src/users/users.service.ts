@@ -62,7 +62,7 @@ export class UsersService {
   }
 
   // Check if user can withdraw bonus (configurable period rule)
-  async canWithdrawBonus(userId: string): Promise<{ canWithdraw: boolean; daysLeft: number; nextWithdrawalDate?: Date }> {
+  async canWithdrawBonus(userId: string): Promise<{ canWithdraw: boolean; daysLeft: number; nextWithdrawalDate?: Date; timeLeft?: string }> {
     const user = await this.userModel.findById(userId);
     if (!user) {
       throw new NotFoundException('User not found');
@@ -72,10 +72,15 @@ export class UsersService {
     
     // Get bonus withdrawal period from settings (default to 15 days)
     let BONUS_WAIT_DAYS = 15;
+    let BONUS_WAIT_UNIT = 'days';
+    let BONUS_WAIT_MS = 15 * 24 * 60 * 60 * 1000; // 15 days in milliseconds
+    
     try {
       const settings = await this.settingsModel.findOne({ key: 'platform' });
       if (settings?.value?.bonusWithdrawalPeriod) {
         BONUS_WAIT_DAYS = settings.value.bonusWithdrawalPeriod;
+        BONUS_WAIT_UNIT = settings.value.bonusWithdrawalUnit || 'days';
+        BONUS_WAIT_MS = settings.value.bonusWithdrawalPeriodMs || (BONUS_WAIT_DAYS * 24 * 60 * 60 * 1000);
       }
     } catch (error) {
       console.error('Error fetching bonus withdrawal period from settings:', error);
@@ -84,29 +89,74 @@ export class UsersService {
 
     // If user has never had an active investment, they can't withdraw
     if (!user.firstActiveInvestmentDate) {
-      return { canWithdraw: false, daysLeft: BONUS_WAIT_DAYS };
+      return { 
+        canWithdraw: false, 
+        daysLeft: BONUS_WAIT_DAYS,
+        timeLeft: `${BONUS_WAIT_DAYS} ${BONUS_WAIT_UNIT}`
+      };
     }
 
     // Check if user has already completed their first period
-    const daysSinceFirstInvestment = Math.floor((now.getTime() - user.firstActiveInvestmentDate.getTime()) / (1000 * 60 * 60 * 24));
+    const timeSinceFirstInvestment = now.getTime() - user.firstActiveInvestmentDate.getTime();
     
     // If user has never withdrawn bonus and hasn't completed the required period, they need to wait
-    if (!user.lastBonusWithdrawalDate && daysSinceFirstInvestment < BONUS_WAIT_DAYS) {
-      const daysLeft = BONUS_WAIT_DAYS - daysSinceFirstInvestment;
-      const nextWithdrawalDate = new Date(user.firstActiveInvestmentDate.getTime() + (BONUS_WAIT_DAYS * 24 * 60 * 60 * 1000));
-      return { canWithdraw: false, daysLeft, nextWithdrawalDate };
+    if (!user.lastBonusWithdrawalDate && timeSinceFirstInvestment < BONUS_WAIT_MS) {
+      const remainingMs = BONUS_WAIT_MS - timeSinceFirstInvestment;
+      const nextWithdrawalDate = new Date(user.firstActiveInvestmentDate.getTime() + BONUS_WAIT_MS);
+      
+      // Calculate remaining time in the appropriate unit
+      let timeLeft: string;
+      let daysLeft: number;
+      
+      if (BONUS_WAIT_UNIT === 'minutes') {
+        daysLeft = Math.ceil(remainingMs / (60 * 1000));
+        timeLeft = `${daysLeft} minutes`;
+      } else if (BONUS_WAIT_UNIT === 'hours') {
+        daysLeft = Math.ceil(remainingMs / (60 * 60 * 1000));
+        timeLeft = `${daysLeft} hours`;
+      } else {
+        daysLeft = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+        timeLeft = `${daysLeft} days`;
+      }
+      
+      return { 
+        canWithdraw: false, 
+        daysLeft, 
+        nextWithdrawalDate,
+        timeLeft
+      };
     }
 
     // If user has completed the initial period OR has already withdrawn before, they can withdraw anytime
-    return { canWithdraw: true, daysLeft: 0 };
+    return { 
+      canWithdraw: true, 
+      daysLeft: 0,
+      timeLeft: '0'
+    };
   }
 
   // Record bonus withdrawal
   async recordBonusWithdrawal(userId: string): Promise<void> {
-    await this.userModel.findByIdAndUpdate(userId, {
-      lastBonusWithdrawalDate: new Date(),
-      $inc: { totalBonusWithdrawals: 1 }
-    });
+    await this.userModel.updateOne(
+      { _id: new Types.ObjectId(userId) },
+      { 
+        $set: { lastBonusWithdrawalDate: new Date() },
+        $inc: { totalBonusWithdrawals: 1 }
+      }
+    );
+  }
+
+  // Mark that user has received welcome bonus
+  async markWelcomeBonusGiven(userId: string): Promise<void> {
+    await this.userModel.updateOne(
+      { _id: new Types.ObjectId(userId) },
+      { 
+        $set: { 
+          welcomeBonusGiven: true,
+          welcomeBonusGivenAt: new Date()
+        }
+      }
+    );
   }
 
   // Set first active investment date
