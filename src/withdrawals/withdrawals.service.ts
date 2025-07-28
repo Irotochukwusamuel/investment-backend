@@ -64,10 +64,21 @@ export class WithdrawalsService {
       }
 
       // Check if user has sufficient earnings (not deposits)
-      const availableEarnings = currency === 'naira' ? wallet.totalEarnings : wallet.totalEarnings;
+      const availableEarnings = wallet.totalEarnings || 0;
       if (availableEarnings < amount) {
         throw new BadRequestException(
           `Insufficient earnings. You can only withdraw your ROI earnings (₦${availableEarnings.toLocaleString()}), not your deposited amounts.`
+        );
+      }
+
+      // Additional check: Ensure user is not trying to withdraw more than their earnings
+      const currentBalance = currency === 'naira' ? wallet.nairaBalance : wallet.usdtBalance;
+      const totalDeposits = wallet.totalDeposits || 0;
+      const actualEarnings = currentBalance - totalDeposits;
+      
+      if (actualEarnings < amount) {
+        throw new BadRequestException(
+          `Insufficient earnings. You can only withdraw your ROI earnings (₦${actualEarnings.toLocaleString()}), not your deposited amounts.`
         );
       }
     }

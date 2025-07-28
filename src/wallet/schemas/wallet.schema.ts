@@ -55,6 +55,14 @@ export class Wallet {
   @Prop({ default: 0, min: 0 })
   totalReferralEarnings: number;
 
+  @ApiProperty({ description: 'Locked naira bonuses (not yet available for withdrawal)' })
+  @Prop({ default: 0, min: 0 })
+  lockedNairaBonuses: number;
+
+  @ApiProperty({ description: 'Locked USDT bonuses (not yet available for withdrawal)' })
+  @Prop({ default: 0, min: 0 })
+  lockedUsdtBonuses: number;
+
   @ApiProperty({ description: 'Last transaction date' })
   @Prop({ default: null })
   lastTransactionDate?: Date;

@@ -140,6 +140,64 @@ export class WalletService {
     return wallet as WalletDocument;
   }
 
+  // New method to handle bonus deposits that go to locked balance
+  async depositBonus(userId: string, depositDto: DepositDto): Promise<WalletDocument> {
+    const { walletType, amount, currency, description } = depositDto;
+    
+    // Always use main wallet for all deposits
+    let wallet: WalletDocument | null = await this.walletModel.findOne({
+      userId: new Types.ObjectId(userId),
+      type: WalletType.MAIN,
+    });
+
+    if (!wallet) {
+      // Create main wallet if it doesn't exist
+      wallet = await this.create({
+        userId,
+        type: WalletType.MAIN,
+        nairaBalance: 0,
+        usdtBalance: 0,
+      });
+    }
+
+    // Add bonus to locked balance instead of available balance
+    if (currency === 'naira') {
+      wallet.lockedNairaBonuses += amount;
+    } else {
+      wallet.lockedUsdtBonuses += amount;
+    }
+    
+    // Track bonus in total bonuses
+    wallet.totalBonuses += amount;
+    
+    wallet.lastTransactionDate = new Date();
+    await wallet.save();
+
+    return wallet as WalletDocument;
+  }
+
+  // Method to unlock bonuses (move from locked to available)
+  async unlockBonus(userId: string, amount: number, currency: 'naira' | 'usdt'): Promise<WalletDocument> {
+    const wallet = await this.findByUserAndType(userId, WalletType.MAIN);
+
+    if (currency === 'naira') {
+      if (wallet.lockedNairaBonuses < amount) {
+        throw new BadRequestException('Insufficient locked naira bonuses');
+      }
+      wallet.lockedNairaBonuses -= amount;
+      wallet.nairaBalance += amount;
+    } else {
+      if (wallet.lockedUsdtBonuses < amount) {
+        throw new BadRequestException('Insufficient locked USDT bonuses');
+      }
+      wallet.lockedUsdtBonuses -= amount;
+      wallet.usdtBalance += amount;
+    }
+
+    wallet.lastTransactionDate = new Date();
+    return wallet.save();
+  }
+
   async withdraw(userId: string, withdrawalDto: WithdrawalDto): Promise<WalletDocument> {
     const { walletType, amount, currency, description } = withdrawalDto;
     

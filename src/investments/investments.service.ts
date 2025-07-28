@@ -153,8 +153,8 @@ export class InvestmentsService {
       // Mark user as having received welcome bonus
       await this.usersService.markWelcomeBonusGiven(userId);
       
-      // Add welcome bonus to user's main wallet
-      await this.walletService.deposit(userId, {
+      // Add welcome bonus to user's locked bonus balance (not available for withdrawal yet)
+      await this.walletService.depositBonus(userId, {
         walletType: WalletType.MAIN,
         amount: welcomeBonus,
         currency: createInvestmentRequestDto.currency,
@@ -201,8 +201,8 @@ export class InvestmentsService {
     if (user.referredBy && referralBonus > 0 && isReferredUserFirstInvestment) {
       console.log(`🎁 Processing referral bonus: ${referralBonus} ${createInvestmentRequestDto.currency} for referrer ${user.referredBy} (referred user's first investment)`);
       
-      // Add referral bonus to referrer's main wallet
-      await this.walletService.deposit(user.referredBy.toString(), {
+      // Add referral bonus to referrer's locked bonus balance (not available for withdrawal yet)
+      await this.walletService.depositBonus(user.referredBy.toString(), {
         walletType: WalletType.MAIN,
         amount: referralBonus,
         currency: createInvestmentRequestDto.currency,
@@ -611,42 +611,22 @@ export class InvestmentsService {
       };
     }
 
-    // Get user's active investments to calculate total bonus
-    const activeInvestments = await this.investmentModel.find({
-      userId: new Types.ObjectId(userId),
-      status: InvestmentStatus.ACTIVE
-    });
+    // Get user's wallet to check locked bonuses
+    const wallet = await this.walletService.findByUserAndType(userId, WalletType.MAIN);
+    const currency = 'naira'; // Default to naira, can be made dynamic later
+    
+    // Calculate total locked bonus
+    const totalLockedBonus = currency === 'naira' ? wallet.lockedNairaBonuses : wallet.lockedUsdtBonuses;
 
-    if (activeInvestments.length === 0) {
-      return {
-        success: false,
-        message: 'You must have at least one active investment to withdraw bonuses.'
-      };
-    }
-
-    // Calculate total bonus (welcome + referral bonuses from active investments)
-    const totalBonus = activeInvestments.reduce((sum, investment) => {
-      return sum + (investment.welcomeBonus || 0) + (investment.referralBonus || 0);
-    }, 0);
-
-    if (totalBonus <= 0) {
+    if (totalLockedBonus <= 0) {
       return {
         success: false,
         message: 'No bonuses available for withdrawal.'
       };
     }
 
-    // Get user to determine currency
-    const user = await this.usersService.findById(userId);
-    const currency = activeInvestments[0]?.currency || 'naira';
-
-    // Add bonus to user's main wallet
-    await this.walletService.deposit(userId, {
-      walletType: WalletType.MAIN,
-      amount: totalBonus,
-      currency,
-      description: 'Bonus withdrawal (Welcome + Referral bonuses)',
-    });
+    // Unlock the bonus (move from locked to available balance)
+    await this.walletService.unlockBonus(userId, totalLockedBonus, currency);
 
     // Record the bonus withdrawal
     await this.usersService.recordBonusWithdrawal(userId);
@@ -655,7 +635,7 @@ export class InvestmentsService {
     await this.transactionsService.create({
       userId,
       type: TransactionType.BONUS,
-      amount: totalBonus,
+      amount: totalLockedBonus,
       currency,
       description: 'Bonus withdrawal (Welcome + Referral bonuses)',
       status: TransactionStatus.SUCCESS,
@@ -663,8 +643,8 @@ export class InvestmentsService {
 
     return {
       success: true,
-      message: `Successfully withdrawn ${totalBonus} ${currency.toUpperCase()} in bonuses.`,
-      amount: totalBonus
+      message: `Successfully withdrawn ${totalLockedBonus} ${currency.toUpperCase()} in bonuses.`,
+      amount: totalLockedBonus
     };
   }
 
