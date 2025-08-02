@@ -1,0 +1,11 @@
+---
+deployment:
+  tasks:
+    - export DEPLOYPATH=/public_html/api/
+    - export NODE_ENV=production
+    - /bin/cp -R dist/* $DEPLOYPATH
+    - /bin/cp package.json $DEPLOYPATH
+    - /bin/cp .htaccess $DEPLOYPATH
+    - cd $DEPLOYPATH
+    - npm install --production
+    - npm start 

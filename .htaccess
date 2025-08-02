@@ -9,10 +9,10 @@ Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-R
 RewriteCond %{REQUEST_METHOD} OPTIONS
 RewriteRule ^(.*)$ $1 [R=200,L]
 
-# API routing
+# Proxy API requests to Node.js application
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^(.*)$ main.js [QSA,L]
+RewriteRule ^(.*)$ http://localhost:3000/$1 [P,L]
 
 # Security headers
 Header always set X-Content-Type-Options nosniff

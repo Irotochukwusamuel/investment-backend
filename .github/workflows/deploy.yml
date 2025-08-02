@@ -35,7 +35,7 @@ jobs:
         username: ${{ secrets.CPANEL_USERNAME }}
         password: ${{ secrets.CPANEL_PASSWORD }}
         server-dir: /public_html/api/
-        local-dir: ./dist/
+        local-dir: ./
         exclude: |
           **/.git*
           **/.git*/**
@@ -54,4 +54,5 @@ jobs:
           **/nest-cli.json
           **/FINTAVA_SETUP.md
           **/RESEND_INTEGRATION.md
-          **/EMAIL_MONITORING.md 
+          **/EMAIL_MONITORING.md
+          **/package.prod.json 
