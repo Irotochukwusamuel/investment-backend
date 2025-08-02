@@ -1,6 +1,6 @@
-# KLTMINES Investment Platform Backend
+# Investment Platform Backend
 
-A comprehensive NestJS backend for the KLTMINES investment platform, providing secure APIs for user management, investment operations, wallet management, and real-time notifications.
+A comprehensive NestJS backend for the  investment platform, providing secure APIs for user management, investment operations, wallet management, and real-time notifications.
 
 ## 🚀 Features
 
@@ -116,7 +116,7 @@ A comprehensive NestJS backend for the KLTMINES investment platform, providing s
    FRONTEND_URL=http://localhost:3000
    
    # Database
-   MONGODB_URI=mongodb://localhost:27017/kltmines
+   MONGODB_URI=mongodb://localhost:27017/db_name
    
    # Redis
    REDIS_HOST=localhost
@@ -129,8 +129,8 @@ A comprehensive NestJS backend for the KLTMINES investment platform, providing s
    
    # Brevo (Email)
    BREVO_API_KEY=your-brevo-api-key
-   SENDER_EMAIL=noreply@kltmines.com
-   SENDER_NAME=KLTMINES
+   SENDER_EMAIL=noreply@email.com
+   SENDER_NAME=name
    
    # Rate Limiting
    RATE_LIMIT_TTL=60
@@ -239,7 +239,7 @@ Authorization: Bearer <your-jwt-token>
 The application uses MongoDB with Mongoose. Configure your connection in `app.module.ts`:
 
 ```typescript
-MongooseModule.forRoot(process.env.MONGODB_URI || 'mongodb://localhost:27017/kltmines')
+MongooseModule.forRoot(process.env.MONGODB_URI || 'mongodb://localhost:27017/db_name')
 ```
 
 ### Redis Configuration

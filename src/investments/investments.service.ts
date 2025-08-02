@@ -538,8 +538,9 @@ export class InvestmentsService {
           _id: null,
           totalInvestments: { $sum: 1 },
           totalAmount: { $sum: '$amount' },
-          totalEarned: { $sum: '$earnedAmount' },
+          totalEarnings: { $sum: '$earnedAmount' },
           totalExpectedReturn: { $sum: '$expectedReturn' },
+          averageRoi: { $avg: '$dailyRoi' },
           activeInvestments: {
             $sum: { $cond: [{ $eq: ['$status', InvestmentStatus.ACTIVE] }, 1, 0] }
           },
@@ -553,14 +554,91 @@ export class InvestmentsService {
       }
     ]);
 
-    return stats[0] || {
-      totalInvestments: 0,
-      totalAmount: 0,
-      totalEarned: 0,
-      totalExpectedReturn: 0,
-      activeInvestments: 0,
-      completedInvestments: 0,
-      cancelledInvestments: 0,
+    // Calculate totalPayouts and pendingPayouts from transaction history
+    const payoutStats = await this.transactionsService.getTransactionModel().aggregate([
+      { 
+        $match: { 
+          ...filter,
+          type: 'roi',
+          status: { $in: ['completed', 'pending'] }
+        } 
+      },
+      {
+        $group: {
+          _id: null,
+          totalPayouts: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status', 'completed'] },
+                '$amount',
+                0
+              ]
+            }
+          },
+          pendingPayouts: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status', 'pending'] },
+                '$amount',
+                0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+
+    // Get recent investments
+    const recentInvestments = await this.investmentModel
+      .find(filter)
+      .populate('planId')
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .exec();
+
+    // Calculate completion rate
+    const totalCompleted = stats[0]?.completedInvestments || 0;
+    const totalInvestments = stats[0]?.totalInvestments || 0;
+    const completionRate = totalInvestments > 0 ? (totalCompleted / totalInvestments) * 100 : 0;
+
+    // Get top performing plan (plan with highest total earnings)
+    const topPerformingPlan = await this.investmentModel.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: '$planId',
+          totalEarnings: { $sum: '$earnedAmount' },
+          totalInvestments: { $sum: 1 }
+        }
+      },
+      { $sort: { totalEarnings: -1 } },
+      { $limit: 1 },
+      {
+        $lookup: {
+          from: 'investmentplans',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'plan'
+        }
+      },
+      { $unwind: '$plan' }
+    ]);
+
+    return {
+      ...stats[0],
+      totalEarnings: stats[0]?.totalEarnings || 0,
+      totalAmount: stats[0]?.totalAmount || 0,
+      activeInvestments: stats[0]?.activeInvestments || 0,
+      averageRoi: stats[0]?.averageRoi || 0,
+      totalPayouts: payoutStats[0]?.totalPayouts || 0,
+      pendingPayouts: payoutStats[0]?.pendingPayouts || 0,
+      completionRate,
+      topPerformingPlan: topPerformingPlan[0]?.plan || null,
+      recentInvestments,
+      totalInvestments: stats[0]?.totalInvestments || 0,
+      totalExpectedReturn: stats[0]?.totalExpectedReturn || 0,
+      completedInvestments: stats[0]?.completedInvestments || 0,
+      cancelledInvestments: stats[0]?.cancelledInvestments || 0,
     };
   }
 
@@ -645,6 +723,70 @@ export class InvestmentsService {
       success: true,
       message: `Successfully withdrawn ${totalLockedBonus} ${currency.toUpperCase()} in bonuses.`,
       amount: totalLockedBonus
+    };
+  }
+
+  // Handle daily ROI withdrawal
+  async withdrawDailyRoi(userId: string): Promise<{ success: boolean; message: string; amount?: number }> {
+    // Get user's active investments
+    const activeInvestments = await this.findActiveInvestmentsByUser(userId);
+    
+    if (activeInvestments.length === 0) {
+      return {
+        success: false,
+        message: 'No active investments found. You need active investments to withdraw daily ROI.'
+      };
+    }
+
+    // Calculate total daily ROI from all active investments
+    let totalDailyRoi = 0;
+    let currency: 'naira' | 'usdt' = 'naira'; // Default currency
+
+    for (const investment of activeInvestments) {
+      // Calculate daily ROI for this investment
+      const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
+      totalDailyRoi += dailyRoiAmount;
+      currency = investment.currency; // Use the currency of the first investment
+    }
+
+    if (totalDailyRoi <= 0) {
+      return {
+        success: false,
+        message: 'No daily ROI available to withdraw.'
+      };
+    }
+
+    // Get user's wallet
+    const wallet = await this.walletService.findByUserAndType(userId, WalletType.MAIN);
+    if (!wallet) {
+      return {
+        success: false,
+        message: 'Wallet not found.'
+      };
+    }
+
+    // Add daily ROI to available balance
+    if (currency === 'naira') {
+      wallet.nairaBalance += totalDailyRoi;
+    } else {
+      wallet.usdtBalance += totalDailyRoi;
+    }
+    await wallet.save();
+
+    // Create transaction record
+    await this.transactionsService.create({
+      userId,
+      type: TransactionType.ROI,
+      amount: totalDailyRoi,
+      currency,
+      description: 'Daily ROI withdrawal',
+      status: TransactionStatus.SUCCESS,
+    });
+
+    return {
+      success: true,
+      message: `Successfully withdrawn ${totalDailyRoi.toFixed(2)} ${currency.toUpperCase()} in daily ROI.`,
+      amount: totalDailyRoi
     };
   }
 

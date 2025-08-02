@@ -164,4 +164,13 @@ export class InvestmentsController {
   async withdrawBonus(@Request() req: any): Promise<{ success: boolean; message: string; amount?: number }> {
     return this.investmentsService.withdrawBonus(req.user.id);
   }
+
+  @Post('withdraw-daily-roi')
+  @ApiOperation({ summary: 'Withdraw daily ROI earnings to available balance' })
+  @ApiResponse({ status: 200, description: 'Daily ROI withdrawn successfully' })
+  @ApiResponse({ status: 400, description: 'No daily ROI available to withdraw' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async withdrawDailyRoi(@Request() req: any): Promise<{ success: boolean; message: string; amount?: number }> {
+    return this.investmentsService.withdrawDailyRoi(req.user.id);
+  }
 } 

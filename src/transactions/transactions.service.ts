@@ -169,19 +169,16 @@ export class TransactionsService {
   }
 
   async findByUser(userId: string, query: any = {}): Promise<Transaction[]> {
-    const { status, type, currency, limit = 50, page = 1 } = query;
-    const filter: any = { userId: new Types.ObjectId(userId) };
-    if (status) filter.status = status;
-    if (type) filter.type = type;
-    if (currency) filter.currency = currency;
-    const skip = (page - 1) * limit;
     return this.transactionModel
-      .find(filter)
-      .populate('investmentId', 'amount planId')
-      .populate('planId', 'name')
+      .find({ userId: new Types.ObjectId(userId), ...query })
+      .populate('investmentId', 'amount currency planId')
+      .populate('planId', 'name description')
       .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
       .exec();
+  }
+
+  // Public method to get the transaction model for use in other services
+  getTransactionModel(): Model<TransactionDocument> {
+    return this.transactionModel;
   }
 } 
