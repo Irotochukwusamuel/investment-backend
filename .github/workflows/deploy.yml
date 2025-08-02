@@ -1,0 +1,57 @@
+name: Deploy Backend to cPanel
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Build application
+      run: npm run build
+      
+    - name: Copy .htaccess
+      run: cp dist/.htaccess dist/.htaccess
+      
+    - name: Deploy to cPanel
+      uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+      with:
+        server: ${{ secrets.CPANEL_SERVER }}
+        username: ${{ secrets.CPANEL_USERNAME }}
+        password: ${{ secrets.CPANEL_PASSWORD }}
+        server-dir: /public_html/api/
+        local-dir: ./dist/
+        exclude: |
+          **/.git*
+          **/.git*/**
+          **/node_modules/**
+          **/.env*
+          **/README.md
+          **/.gitignore
+          **/.prettierrc
+          **/eslint.config.mjs
+          **/tsconfig*
+          **/package-lock.json
+          **/test/**
+          **/src/**
+          **/node_modules/**
+          **/.nvmrc
+          **/nest-cli.json
+          **/FINTAVA_SETUP.md
+          **/RESEND_INTEGRATION.md
+          **/EMAIL_MONITORING.md 
