@@ -1,9 +1,18 @@
 RewriteEngine On
 
-# Handle API routes
+# Handle CORS
+Header always set Access-Control-Allow-Origin "*"
+Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+
+# Handle preflight requests
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteRule ^(.*)$ $1 [R=200,L]
+
+# API routing
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^api/(.*)$ index.php [QSA,L]
+RewriteRule ^(.*)$ main.js [QSA,L]
 
 # Security headers
 Header always set X-Content-Type-Options nosniff
@@ -11,11 +20,14 @@ Header always set X-Frame-Options DENY
 Header always set X-XSS-Protection "1; mode=block"
 Header always set Referrer-Policy "strict-origin-when-cross-origin"
 
-# CORS headers for API
-Header always set Access-Control-Allow-Origin "*"
-Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
-Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+# Cache control for API responses
+<FilesMatch "\.(js|css|json)$">
+    Header set Cache-Control "public, max-age=3600"
+</FilesMatch>
 
-# Handle preflight requests
-RewriteCond %{REQUEST_METHOD} OPTIONS
-RewriteRule ^(.*)$ $1 [R=200,L] 
+# No cache for API endpoints
+<FilesMatch "main\.js$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+</FilesMatch> 
