@@ -127,6 +127,11 @@ export class PaymentsService {
     this.baseUrl = this.configService.get<string>('FINTAVA_BASE_URL', 'https://dev.fintavapay.com/api/dev');
     this.webhookUrl = this.configService.get<string>('FINTAVA_WEBHOOK_URL', 'http://localhost:3001/api/v1/payments/webhook/fintava');
     
+    // Debug logging to see the API key value
+    this.logger.debug(`FINTAVA_API_KEY value: ${apiKey}`);
+    this.logger.debug(`FINTAVA_API_KEY length: ${apiKey?.length}`);
+    this.logger.debug(`FINTAVA_API_KEY type: ${typeof apiKey}`);
+    
     if (!apiKey) {
       this.logger.error('FINTAVA_API_KEY not found in environment variables');
       throw new Error('FINTAVA_API_KEY is required');
