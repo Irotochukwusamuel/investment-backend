@@ -109,14 +109,21 @@ export class UsersService {
       let daysLeft: number;
       
       if (BONUS_WAIT_UNIT === 'minutes') {
-        daysLeft = Math.ceil(remainingMs / (60 * 1000));
+        daysLeft = Math.max(0, Math.ceil(remainingMs / (60 * 1000)));
         timeLeft = `${daysLeft} minutes`;
       } else if (BONUS_WAIT_UNIT === 'hours') {
-        daysLeft = Math.ceil(remainingMs / (60 * 60 * 1000));
+        daysLeft = Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000)));
         timeLeft = `${daysLeft} hours`;
       } else {
-        daysLeft = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
-        timeLeft = `${daysLeft} days`;
+        // For days, show more detailed format
+        daysLeft = Math.max(0, Math.ceil(remainingMs / (24 * 60 * 60 * 1000)));
+        if (daysLeft > 0) {
+          timeLeft = `${daysLeft} days`;
+        } else {
+          // If less than a day, show hours
+          const hoursLeft = Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000)));
+          timeLeft = `${hoursLeft} hours`;
+        }
       }
       
       return { 
@@ -436,6 +443,29 @@ export class UsersService {
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
     await user.save();
+  }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<{ message: string }> {
+    const user = await this.userModel.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isCurrentPasswordValid) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    // Hash new password
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update password
+    user.password = hashedPassword;
+    await user.save();
+
+    return { message: 'Password changed successfully' };
   }
 
   async updateLastLogin(userId: string): Promise<void> {

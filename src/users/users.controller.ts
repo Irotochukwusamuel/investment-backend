@@ -180,6 +180,20 @@ export class UsersController {
     return this.usersService.resetPassword(body.token, body.newPassword);
   }
 
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Change user password' })
+  @ApiResponse({ status: 200, description: 'Password changed successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid current password' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async changePassword(
+    @Request() req: any,
+    @Body() body: { currentPassword: string; newPassword: string },
+  ): Promise<{ message: string }> {
+    return this.usersService.changePassword(req.user.id, body.currentPassword, body.newPassword);
+  }
+
   @Get('referrals')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
