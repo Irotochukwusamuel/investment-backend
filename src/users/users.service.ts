@@ -68,47 +68,6 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    // Debug logging
-    console.log('🔄 canWithdrawBonus Debug:', {
-      userId: userId,
-      hasReceivedAnyBonus: user.hasReceivedAnyBonus,
-      firstBonusReceivedAt: user.firstBonusReceivedAt,
-      lastBonusReceivedAt: user.lastBonusReceivedAt,
-      lastBonusWithdrawalDate: user.lastBonusWithdrawalDate,
-      welcomeBonusGiven: user.welcomeBonusGiven,
-      welcomeBonusGivenAt: user.welcomeBonusGivenAt,
-      firstActiveInvestmentDate: user.firstActiveInvestmentDate,
-      totalReferralEarnings: user.totalReferralEarnings,
-      walletBalance: user.walletBalance
-    });
-
-    // Check if user has active investments
-    const activeInvestments = await this.investmentModel.countDocuments({
-      userId: new Types.ObjectId(userId),
-      status: 'active'
-    });
-    
-    console.log('🔄 Active Investments Count:', activeInvestments);
-    
-    // Check if user has actually received bonuses (based on earnings)
-    const hasEarnedBonuses = user.totalReferralEarnings > 0 || user.welcomeBonusGiven;
-    console.log('🔄 Has Earned Bonuses:', hasEarnedBonuses);
-    
-    // If user has earned bonuses but firstBonusReceivedAt is not set, set it
-    if (hasEarnedBonuses && !user.firstBonusReceivedAt) {
-      console.log('🔄 Setting firstBonusReceivedAt for user who has earned bonuses');
-      await this.userModel.findByIdAndUpdate(userId, {
-        hasReceivedAnyBonus: true,
-        firstBonusReceivedAt: user.welcomeBonusGivenAt || new Date(),
-      });
-      // Refresh user data
-      const updatedUser = await this.userModel.findById(userId);
-      if (updatedUser) {
-        user.firstBonusReceivedAt = updatedUser.firstBonusReceivedAt;
-        user.hasReceivedAnyBonus = updatedUser.hasReceivedAnyBonus;
-      }
-    }
-
     const now = new Date();
     
     // Get bonus withdrawal period from settings (default to 15 minutes)
@@ -126,6 +85,29 @@ export class UsersService {
     } catch (error) {
       console.error('Error fetching bonus withdrawal period from settings:', error);
       // Fallback to default 15 minutes
+    }
+
+    // Check if user has active investments
+    const activeInvestments = await this.investmentModel.countDocuments({
+      userId: new Types.ObjectId(userId),
+      status: 'active'
+    });
+    
+    // Check if user has actually received bonuses (based on earnings)
+    const hasEarnedBonuses = user.totalReferralEarnings > 0 || user.welcomeBonusGiven;
+    
+    // If user has earned bonuses but firstBonusReceivedAt is not set, set it
+    if (hasEarnedBonuses && !user.firstBonusReceivedAt) {
+      await this.userModel.findByIdAndUpdate(userId, {
+        hasReceivedAnyBonus: true,
+        firstBonusReceivedAt: user.welcomeBonusGivenAt || new Date(),
+      });
+      // Refresh user data
+      const updatedUser = await this.userModel.findById(userId);
+      if (updatedUser) {
+        user.firstBonusReceivedAt = updatedUser.firstBonusReceivedAt;
+        user.hasReceivedAnyBonus = updatedUser.hasReceivedAnyBonus;
+      }
     }
 
     // If user has never received any bonus, they can't withdraw
@@ -448,22 +430,13 @@ export class UsersService {
   }
 
   async findById(id: string): Promise<User> {
-    // Debug logging
-    console.log('🔄 findById Debug:', {
-      id: id,
-      idType: typeof id,
-      idLength: id?.length
-    });
-    
     // Handle both string and ObjectId formats
     let objectId: Types.ObjectId;
     
     try {
       // Try to convert string to ObjectId
       objectId = new Types.ObjectId(id);
-      console.log('🔄 ObjectId created successfully:', objectId);
     } catch (error) {
-      console.error('🔄 ObjectId creation failed:', error);
       throw new BadRequestException('Invalid user ID format');
     }
 

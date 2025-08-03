@@ -162,13 +162,6 @@ export class UsersController {
   async getBonusCountdown(@Request() req) {
     const userId = req.user.id;
     
-    // Debug logging
-    console.log('🔄 Bonus Countdown Debug:', {
-      userId: userId,
-      userIdType: typeof userId,
-      userObject: req.user
-    });
-    
     const result = await this.usersService.canWithdrawBonus(userId);
     
     // Calculate real-time countdown data

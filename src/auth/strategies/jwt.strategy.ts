@@ -18,13 +18,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    // Debug logging
-    console.log('🔄 JWT Strategy Debug:', {
-      payload: payload,
-      payloadSub: payload.sub,
-      payloadSubType: typeof payload.sub
-    });
-    
     const user = await this.usersService.findById(payload.sub);
     if (!user || !user.isActive) {
       throw new UnauthorizedException();
