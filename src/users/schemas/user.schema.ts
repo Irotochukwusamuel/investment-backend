@@ -100,6 +100,17 @@ export class User {
 
   @Prop()
   welcomeBonusGivenAt?: Date;
+
+  // First bonus received tracking (for countdown calculation)
+  @Prop()
+  firstBonusReceivedAt?: Date;
+
+  @Prop({ default: false })
+  hasReceivedAnyBonus: boolean;
+
+  // Subsequent bonus tracking
+  @Prop()
+  lastBonusReceivedAt?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

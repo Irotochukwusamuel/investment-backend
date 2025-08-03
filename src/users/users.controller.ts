@@ -19,11 +19,12 @@ import { CreateBankDetailsDto, UpdateBankDetailsDto } from './dto/bank-details.d
 import { User } from './schemas/user.schema';
 import { BankDetails } from './schemas/bank-details.schema';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { SettingsService } from '../settings/settings.service';
 
 @ApiTags('users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(private readonly usersService: UsersService, private readonly settingsService: SettingsService) {}
 
   @Get('profile')
   @UseGuards(JwtAuthGuard)
@@ -136,6 +137,129 @@ export class UsersController {
     return this.usersService.getUsersStats();
   }
 
+  @Get('referrals')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current user referrals' })
+  @ApiResponse({ status: 200, description: 'User referrals retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getMyReferrals(@Request() req: any) {
+    return this.usersService.getMyReferrals(req.user.id);
+  }
+
+  @Get('referrals/verify')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Verify referral storage for current user' })
+  @ApiResponse({ status: 200, description: 'Referral storage verification completed' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async verifyReferralStorage(@Request() req: any) {
+    return this.usersService.verifyReferralStorage(req.user.id);
+  }
+
+  @Get('bonus-countdown')
+  @UseGuards(JwtAuthGuard)
+  async getBonusCountdown(@Request() req) {
+    const userId = req.user.id;
+    
+    // Debug logging
+    console.log('🔄 Bonus Countdown Debug:', {
+      userId: userId,
+      userIdType: typeof userId,
+      userObject: req.user
+    });
+    
+    const result = await this.usersService.canWithdrawBonus(userId);
+    
+    // Calculate real-time countdown data
+    const user = await this.usersService.findById(userId);
+    const now = new Date();
+    
+    let countdownData = {
+      canWithdraw: result.canWithdraw,
+      timeLeft: result.timeLeft,
+      daysLeft: result.daysLeft,
+      nextWithdrawalDate: result.nextWithdrawalDate,
+      progress: 0,
+      timeLeftMs: 0,
+      formattedTimeLeft: '0'
+    };
+    
+    if (!result.canWithdraw) {
+      // Get bonus withdrawal period from settings
+      const settings = await this.settingsService.getBonusWithdrawalPeriod();
+      const bonusPeriodMs = settings.bonusWithdrawalPeriodMs;
+      
+      // Determine which date to use for countdown calculation
+      let startDate: Date;
+      let timeElapsed: number;
+      
+      if (user.lastBonusWithdrawalDate) {
+        // User has withdrawn before, check if they have new bonuses
+        if (user.lastBonusReceivedAt && user.lastBonusReceivedAt > user.lastBonusWithdrawalDate) {
+          // User has received new bonuses after last withdrawal, use new bonus date
+          startDate = user.lastBonusReceivedAt;
+          timeElapsed = now.getTime() - user.lastBonusReceivedAt.getTime();
+        } else {
+          // No new bonuses, use last withdrawal date
+          startDate = user.lastBonusWithdrawalDate;
+          timeElapsed = now.getTime() - user.lastBonusWithdrawalDate.getTime();
+        }
+      } else if (user.firstBonusReceivedAt) {
+        // User has never withdrawn, use first bonus received date
+        startDate = user.firstBonusReceivedAt;
+        timeElapsed = now.getTime() - user.firstBonusReceivedAt.getTime();
+      } else {
+        // No bonus received yet
+        return {
+          success: true,
+          data: countdownData
+        };
+      }
+      
+      const remainingMs = Math.max(0, bonusPeriodMs - timeElapsed);
+      
+      // Calculate progress percentage
+      const progress = Math.max(0, Math.min(100, (timeElapsed / bonusPeriodMs) * 100));
+      
+      // Format time left
+      let formattedTimeLeft = '0';
+      if (remainingMs > 0) {
+        const totalMinutes = Math.floor(remainingMs / (60 * 1000));
+        const totalHours = Math.floor(remainingMs / (60 * 60 * 1000));
+        const totalDays = Math.floor(remainingMs / (24 * 60 * 60 * 1000));
+        
+        if (totalMinutes < 60) {
+          formattedTimeLeft = `${totalMinutes}m`;
+        } else if (totalHours < 24) {
+          const hours = Math.floor(remainingMs / (60 * 60 * 1000));
+          const minutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
+          formattedTimeLeft = `${hours}h ${minutes}m`;
+        } else {
+          const days = Math.floor(remainingMs / (24 * 60 * 60 * 1000));
+          const hours = Math.floor((remainingMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+          if (hours > 0) {
+            formattedTimeLeft = `${days}d ${hours}h`;
+          } else {
+            formattedTimeLeft = `${days}d`;
+          }
+        }
+      }
+      
+      countdownData = {
+        ...countdownData,
+        progress,
+        timeLeftMs: remainingMs,
+        formattedTimeLeft
+      };
+    }
+    
+    return {
+      success: true,
+      data: countdownData
+    };
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get user by ID' })
   @ApiResponse({ status: 200, description: 'User found', type: User })
@@ -192,25 +316,5 @@ export class UsersController {
     @Body() body: { currentPassword: string; newPassword: string },
   ): Promise<{ message: string }> {
     return this.usersService.changePassword(req.user.id, body.currentPassword, body.newPassword);
-  }
-
-  @Get('referrals')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get current user referrals' })
-  @ApiResponse({ status: 200, description: 'User referrals retrieved successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async getMyReferrals(@Request() req: any) {
-    return this.usersService.getMyReferrals(req.user.id);
-  }
-
-  @Get('referrals/verify')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Verify referral storage for current user' })
-  @ApiResponse({ status: 200, description: 'Referral storage verification completed' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async verifyReferralStorage(@Request() req: any) {
-    return this.usersService.verifyReferralStorage(req.user.id);
   }
 } 

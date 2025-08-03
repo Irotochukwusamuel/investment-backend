@@ -1,29 +1,26 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
-@ApiTags('Health')
+@ApiTags('app')
 @Controller()
 export class AppController {
-  @Get('health')
+  @Get()
   @ApiOperation({ summary: 'Health check endpoint' })
-  @ApiResponse({ status: 200, description: 'Service is healthy' })
-  getHealth() {
+  @ApiResponse({ status: 200, description: 'Application is running' })
+  getHello(): { message: string; timestamp: string } {
     return {
-      status: 'ok',
+      message: 'KLT Mines Investment Platform API is running',
       timestamp: new Date().toISOString(),
-      service: 'KLTMINES Investment Platform Backend',
-      version: '1.0.0'
     };
   }
 
-  @Get()
-  @ApiOperation({ summary: 'Root endpoint' })
-  @ApiResponse({ status: 200, description: 'Welcome message' })
-  getHello() {
+  @Get('health')
+  @ApiOperation({ summary: 'Health check endpoint' })
+  @ApiResponse({ status: 200, description: 'Application is healthy' })
+  getHealth(): { status: string; timestamp: string } {
     return {
-      message: 'Welcome to KLTMINES Investment Platform Backend',
-      version: '1.0.0',
-      docs: '/api/docs'
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
     };
   }
 } 

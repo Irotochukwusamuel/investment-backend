@@ -49,7 +49,7 @@ export class AuthService {
 
     // Generate JWT token
     const payload = { 
-      sub: user._id, 
+      sub: user._id.toString(), // Ensure it's a string
       email: user.email, 
       role: user.role 
     };
@@ -96,7 +96,7 @@ export class AuthService {
     const user = await this.usersService.findById(userId);
     
     const payload = { 
-      sub: user._id, 
+      sub: user._id.toString(), // Ensure it's a string
       email: user.email, 
       role: user.role 
     };

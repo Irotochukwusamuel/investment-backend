@@ -9,6 +9,7 @@ import { Settings, SettingsSchema } from '../schemas/settings.schema';
 import { EmailModule } from '../email/email.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { ReferralsModule } from '../referrals/referrals.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { ReferralsModule } from '../referrals/referrals.module';
     EmailModule,
     WalletModule,
     forwardRef(() => ReferralsModule),
+    SettingsModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

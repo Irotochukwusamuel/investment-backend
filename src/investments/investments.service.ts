@@ -153,6 +153,9 @@ export class InvestmentsService {
       // Mark user as having received welcome bonus
       await this.usersService.markWelcomeBonusGiven(userId);
       
+      // Track when user receives any bonus (first or subsequent)
+      await this.usersService.trackNewBonusReceived(userId);
+      
       // Add welcome bonus to user's locked bonus balance (not available for withdrawal yet)
       await this.walletService.depositBonus(userId, {
         walletType: WalletType.MAIN,
@@ -211,6 +214,9 @@ export class InvestmentsService {
 
       // Update referrer's referral earnings
       await this.usersService.updateReferralStats(user.referredBy.toString(), referralBonus);
+
+      // Track when referrer receives any bonus (first or subsequent)
+      await this.usersService.trackNewBonusReceived(user.referredBy.toString());
 
       // Update referral record to mark as active and add bonus
       let referral: Referral | null = null;

@@ -68,6 +68,47 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
+    // Debug logging
+    console.log('🔄 canWithdrawBonus Debug:', {
+      userId: userId,
+      hasReceivedAnyBonus: user.hasReceivedAnyBonus,
+      firstBonusReceivedAt: user.firstBonusReceivedAt,
+      lastBonusReceivedAt: user.lastBonusReceivedAt,
+      lastBonusWithdrawalDate: user.lastBonusWithdrawalDate,
+      welcomeBonusGiven: user.welcomeBonusGiven,
+      welcomeBonusGivenAt: user.welcomeBonusGivenAt,
+      firstActiveInvestmentDate: user.firstActiveInvestmentDate,
+      totalReferralEarnings: user.totalReferralEarnings,
+      walletBalance: user.walletBalance
+    });
+
+    // Check if user has active investments
+    const activeInvestments = await this.investmentModel.countDocuments({
+      userId: new Types.ObjectId(userId),
+      status: 'active'
+    });
+    
+    console.log('🔄 Active Investments Count:', activeInvestments);
+    
+    // Check if user has actually received bonuses (based on earnings)
+    const hasEarnedBonuses = user.totalReferralEarnings > 0 || user.welcomeBonusGiven;
+    console.log('🔄 Has Earned Bonuses:', hasEarnedBonuses);
+    
+    // If user has earned bonuses but firstBonusReceivedAt is not set, set it
+    if (hasEarnedBonuses && !user.firstBonusReceivedAt) {
+      console.log('🔄 Setting firstBonusReceivedAt for user who has earned bonuses');
+      await this.userModel.findByIdAndUpdate(userId, {
+        hasReceivedAnyBonus: true,
+        firstBonusReceivedAt: user.welcomeBonusGivenAt || new Date(),
+      });
+      // Refresh user data
+      const updatedUser = await this.userModel.findById(userId);
+      if (updatedUser) {
+        user.firstBonusReceivedAt = updatedUser.firstBonusReceivedAt;
+        user.hasReceivedAnyBonus = updatedUser.hasReceivedAnyBonus;
+      }
+    }
+
     const now = new Date();
     
     // Get bonus withdrawal period from settings (default to 15 minutes)
@@ -87,54 +128,150 @@ export class UsersService {
       // Fallback to default 15 minutes
     }
 
-    // If user has never had an active investment, they can't withdraw
-    if (!user.firstActiveInvestmentDate) {
+    // If user has never received any bonus, they can't withdraw
+    if (!user.hasReceivedAnyBonus || !user.firstBonusReceivedAt) {
       return { 
         canWithdraw: false, 
         daysLeft: BONUS_WAIT_VALUE,
-        timeLeft: `${BONUS_WAIT_VALUE} ${BONUS_WAIT_UNIT}`
+        timeLeft: `${BONUS_WAIT_VALUE} ${BONUS_WAIT_UNIT}`,
+        nextWithdrawalDate: new Date(now.getTime() + BONUS_WAIT_MS)
       };
     }
 
-    // Check if user has already completed their first period
-    const timeSinceFirstInvestment = now.getTime() - user.firstActiveInvestmentDate.getTime();
+    // Check if user has already withdrawn bonus before
+    if (user.lastBonusWithdrawalDate) {
+      // User has withdrawn before, check if they have new bonuses since last withdrawal
+      const timeSinceLastWithdrawal = now.getTime() - user.lastBonusWithdrawalDate.getTime();
+      
+      // If user has received new bonuses after last withdrawal, use the new bonus date
+      if (user.lastBonusReceivedAt && user.lastBonusReceivedAt > user.lastBonusWithdrawalDate) {
+        const timeSinceNewBonus = now.getTime() - user.lastBonusReceivedAt.getTime();
+        
+        // If it's been less than the required period since new bonus received, they need to wait
+        if (timeSinceNewBonus < BONUS_WAIT_MS) {
+          const remainingMs = BONUS_WAIT_MS - timeSinceNewBonus;
+          const nextWithdrawalDate = new Date(user.lastBonusReceivedAt.getTime() + BONUS_WAIT_MS);
+          
+          // Calculate remaining time in the appropriate unit
+          let timeLeft: string;
+          let daysLeft: number;
+          
+          if (BONUS_WAIT_UNIT === 'minutes') {
+            daysLeft = Math.max(0, Math.floor(remainingMs / (60 * 1000)));
+            timeLeft = `${daysLeft} minutes`;
+          } else if (BONUS_WAIT_UNIT === 'hours') {
+            daysLeft = Math.max(0, Math.floor(remainingMs / (60 * 60 * 1000)));
+            timeLeft = `${daysLeft} hours`;
+          } else {
+            // For days, show more detailed format
+            daysLeft = Math.max(0, Math.floor(remainingMs / (24 * 60 * 60 * 1000)));
+            if (daysLeft > 0) {
+              timeLeft = `${daysLeft} days`;
+            } else {
+              // If less than a day, show hours
+              const hoursLeft = Math.max(0, Math.floor(remainingMs / (60 * 60 * 1000)));
+              timeLeft = `${hoursLeft} hours`;
+            }
+          }
+          
+          return { 
+            canWithdraw: false, 
+            daysLeft,
+            nextWithdrawalDate,
+            timeLeft
+          };
+        }
+        
+        // If enough time has passed since new bonus, they can withdraw again
+        return { 
+          canWithdraw: true, 
+          daysLeft: 0,
+          timeLeft: '0'
+        };
+      }
+      
+      // If it's been less than the required period since last withdrawal, they need to wait
+      if (timeSinceLastWithdrawal < BONUS_WAIT_MS) {
+        const remainingMs = BONUS_WAIT_MS - timeSinceLastWithdrawal;
+        const nextWithdrawalDate = new Date(user.lastBonusWithdrawalDate.getTime() + BONUS_WAIT_MS);
+        
+        // Calculate remaining time in the appropriate unit
+        let timeLeft: string;
+        let daysLeft: number;
+        
+        if (BONUS_WAIT_UNIT === 'minutes') {
+          daysLeft = Math.max(0, Math.floor(remainingMs / (60 * 1000)));
+          timeLeft = `${daysLeft} minutes`;
+        } else if (BONUS_WAIT_UNIT === 'hours') {
+          daysLeft = Math.max(0, Math.floor(remainingMs / (60 * 60 * 1000)));
+          timeLeft = `${daysLeft} hours`;
+        } else {
+          // For days, show more detailed format
+          daysLeft = Math.max(0, Math.floor(remainingMs / (24 * 60 * 60 * 1000)));
+          if (daysLeft > 0) {
+            timeLeft = `${daysLeft} days`;
+          } else {
+            // If less than a day, show hours
+            const hoursLeft = Math.max(0, Math.floor(remainingMs / (60 * 60 * 1000)));
+            timeLeft = `${hoursLeft} hours`;
+          }
+        }
+        
+        return { 
+          canWithdraw: false, 
+          daysLeft,
+          nextWithdrawalDate,
+          timeLeft
+        };
+      }
+      
+      // If enough time has passed since last withdrawal, they can withdraw again
+      return { 
+        canWithdraw: true, 
+        daysLeft: 0,
+        timeLeft: '0'
+      };
+    }
+
+    // User has never withdrawn bonus before, check if they have completed the initial period
+    const timeSinceFirstBonus = now.getTime() - user.firstBonusReceivedAt.getTime();
     
-    // If user has never withdrawn bonus and hasn't completed the required period, they need to wait
-    if (!user.lastBonusWithdrawalDate && timeSinceFirstInvestment < BONUS_WAIT_MS) {
-      const remainingMs = BONUS_WAIT_MS - timeSinceFirstInvestment;
-      const nextWithdrawalDate = new Date(user.firstActiveInvestmentDate.getTime() + BONUS_WAIT_MS);
+    // If user hasn't completed the required period since first bonus received, they need to wait
+    if (timeSinceFirstBonus < BONUS_WAIT_MS) {
+      const remainingMs = BONUS_WAIT_MS - timeSinceFirstBonus;
+      const nextWithdrawalDate = new Date(user.firstBonusReceivedAt.getTime() + BONUS_WAIT_MS);
       
       // Calculate remaining time in the appropriate unit
       let timeLeft: string;
       let daysLeft: number;
       
       if (BONUS_WAIT_UNIT === 'minutes') {
-        daysLeft = Math.max(0, Math.ceil(remainingMs / (60 * 1000)));
+        daysLeft = Math.max(0, Math.floor(remainingMs / (60 * 1000)));
         timeLeft = `${daysLeft} minutes`;
       } else if (BONUS_WAIT_UNIT === 'hours') {
-        daysLeft = Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000)));
+        daysLeft = Math.max(0, Math.floor(remainingMs / (60 * 60 * 1000)));
         timeLeft = `${daysLeft} hours`;
       } else {
         // For days, show more detailed format
-        daysLeft = Math.max(0, Math.ceil(remainingMs / (24 * 60 * 60 * 1000)));
+        daysLeft = Math.max(0, Math.floor(remainingMs / (24 * 60 * 60 * 1000)));
         if (daysLeft > 0) {
           timeLeft = `${daysLeft} days`;
         } else {
           // If less than a day, show hours
-          const hoursLeft = Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000)));
+          const hoursLeft = Math.max(0, Math.floor(remainingMs / (60 * 60 * 1000)));
           timeLeft = `${hoursLeft} hours`;
         }
       }
       
       return { 
         canWithdraw: false, 
-        daysLeft, 
+        daysLeft,
         nextWithdrawalDate,
         timeLeft
       };
     }
 
-    // If user has completed the initial period OR has already withdrawn before, they can withdraw anytime
+    // User can withdraw bonus
     return { 
       canWithdraw: true, 
       daysLeft: 0,
@@ -153,17 +290,58 @@ export class UsersService {
     );
   }
 
-  // Mark that user has received welcome bonus
+  // Mark welcome bonus as given
   async markWelcomeBonusGiven(userId: string): Promise<void> {
-    await this.userModel.updateOne(
-      { _id: new Types.ObjectId(userId) },
-      { 
-        $set: { 
-          welcomeBonusGiven: true,
-          welcomeBonusGivenAt: new Date()
-        }
-      }
-    );
+    const user = await this.userModel.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (!user.welcomeBonusGiven) {
+      await this.userModel.findByIdAndUpdate(userId, {
+        welcomeBonusGiven: true,
+        welcomeBonusGivenAt: new Date(),
+        hasReceivedAnyBonus: true,
+        firstBonusReceivedAt: user.firstBonusReceivedAt || new Date(), // Set if not already set
+      });
+    }
+  }
+
+  // Track when user first receives any bonus (welcome or referral)
+  async trackFirstBonusReceived(userId: string): Promise<void> {
+    const user = await this.userModel.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (!user.hasReceivedAnyBonus) {
+      await this.userModel.findByIdAndUpdate(userId, {
+        hasReceivedAnyBonus: true,
+        firstBonusReceivedAt: new Date(),
+      });
+    }
+  }
+
+  // Track when user receives new bonuses (for subsequent bonus tracking)
+  async trackNewBonusReceived(userId: string): Promise<void> {
+    const user = await this.userModel.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // If user has already withdrawn bonuses before, update the last bonus received date
+    // This will reset the countdown for new bonuses
+    if (user.lastBonusWithdrawalDate) {
+      await this.userModel.findByIdAndUpdate(userId, {
+        lastBonusReceivedAt: new Date(), // Track when new bonus was received
+      });
+    } else if (!user.hasReceivedAnyBonus) {
+      // First time receiving any bonus
+      await this.userModel.findByIdAndUpdate(userId, {
+        hasReceivedAnyBonus: true,
+        firstBonusReceivedAt: new Date(),
+      });
+    }
   }
 
   // Set first active investment date
@@ -270,11 +448,26 @@ export class UsersService {
   }
 
   async findById(id: string): Promise<User> {
-    if (!Types.ObjectId.isValid(id)) {
-      throw new BadRequestException('Invalid user ID');
+    // Debug logging
+    console.log('🔄 findById Debug:', {
+      id: id,
+      idType: typeof id,
+      idLength: id?.length
+    });
+    
+    // Handle both string and ObjectId formats
+    let objectId: Types.ObjectId;
+    
+    try {
+      // Try to convert string to ObjectId
+      objectId = new Types.ObjectId(id);
+      console.log('🔄 ObjectId created successfully:', objectId);
+    } catch (error) {
+      console.error('🔄 ObjectId creation failed:', error);
+      throw new BadRequestException('Invalid user ID format');
     }
 
-    const user = await this.userModel.findById(id).select('-password').exec();
+    const user = await this.userModel.findById(objectId).select('-password').exec();
     if (!user) {
       throw new NotFoundException('User not found');
     }
@@ -296,11 +489,17 @@ export class UsersService {
   }
 
   async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
-    if (!Types.ObjectId.isValid(id)) {
-      throw new BadRequestException('Invalid user ID');
+    // Handle both string and ObjectId formats
+    let objectId: Types.ObjectId;
+    
+    try {
+      // Try to convert string to ObjectId
+      objectId = new Types.ObjectId(id);
+    } catch (error) {
+      throw new BadRequestException('Invalid user ID format');
     }
 
-    const user = await this.userModel.findById(id);
+    const user = await this.userModel.findById(objectId);
     if (!user) {
       throw new NotFoundException('User not found');
     }
@@ -321,7 +520,7 @@ export class UsersService {
     }
 
     const updatedUser = await this.userModel
-      .findByIdAndUpdate(id, updateUserDto, { new: true })
+      .findByIdAndUpdate(objectId, updateUserDto, { new: true })
       .select('-password')
       .exec();
 
@@ -333,25 +532,37 @@ export class UsersService {
   }
 
   async remove(id: string): Promise<void> {
-    if (!Types.ObjectId.isValid(id)) {
-      throw new BadRequestException('Invalid user ID');
+    // Handle both string and ObjectId formats
+    let objectId: Types.ObjectId;
+    
+    try {
+      // Try to convert string to ObjectId
+      objectId = new Types.ObjectId(id);
+    } catch (error) {
+      throw new BadRequestException('Invalid user ID format');
     }
 
-    const user = await this.userModel.findById(id);
+    const user = await this.userModel.findById(objectId);
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
     // Soft delete - set isActive to false
-    await this.userModel.findByIdAndUpdate(id, { isActive: false });
+    await this.userModel.findByIdAndUpdate(objectId, { isActive: false });
   }
 
   async updateWalletBalance(userId: string, amount: number): Promise<User> {
-    if (!Types.ObjectId.isValid(userId)) {
-      throw new BadRequestException('Invalid user ID');
+    // Handle both string and ObjectId formats
+    let objectId: Types.ObjectId;
+    
+    try {
+      // Try to convert string to ObjectId
+      objectId = new Types.ObjectId(userId);
+    } catch (error) {
+      throw new BadRequestException('Invalid user ID format');
     }
 
-    const user = await this.userModel.findById(userId);
+    const user = await this.userModel.findById(objectId);
     if (!user) {
       throw new NotFoundException('User not found');
     }
@@ -361,11 +572,17 @@ export class UsersService {
   }
 
   async updateTotalInvested(userId: string, amount: number): Promise<User> {
-    if (!Types.ObjectId.isValid(userId)) {
-      throw new BadRequestException('Invalid user ID');
+    // Handle both string and ObjectId formats
+    let objectId: Types.ObjectId;
+    
+    try {
+      // Try to convert string to ObjectId
+      objectId = new Types.ObjectId(userId);
+    } catch (error) {
+      throw new BadRequestException('Invalid user ID format');
     }
 
-    const user = await this.userModel.findById(userId);
+    const user = await this.userModel.findById(objectId);
     if (!user) {
       throw new NotFoundException('User not found');
     }
