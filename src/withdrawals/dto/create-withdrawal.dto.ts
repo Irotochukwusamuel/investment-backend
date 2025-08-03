@@ -11,6 +11,11 @@ export class CreateWithdrawalDto {
   @IsEnum(['naira', 'usdt'])
   currency: 'naira' | 'usdt';
 
+  @ApiPropertyOptional({ description: 'Withdrawal method', enum: ['bank_transfer', 'crypto'] })
+  @IsOptional()
+  @IsEnum(['bank_transfer', 'crypto'])
+  withdrawalMethod?: 'bank_transfer' | 'crypto';
+
   @ApiPropertyOptional({ description: 'Additional notes for the withdrawal' })
   @IsOptional()
   notes?: string;

@@ -16,7 +16,7 @@ export class ResendEmailProvider implements EmailProvider {
     const apiKey = this.configService.get<string>('RESEND_API_KEY');
     // Use onboarding@resend.dev as default - this domain is pre-verified by Resend
     this.senderEmail = this.configService.get<string>('RESEND_SENDER_EMAIL', 'onboarding@resend.dev');
-    this.senderName = this.configService.get<string>('RESEND_SENDER_NAME', 'KLT Mines Investment Platform');
+    this.senderName = this.configService.get<string>('RESEND_SENDER_NAME', 'KLTMINES Investment Platform');
 
     if (!apiKey) {
       this.logger.warn('RESEND_API_KEY not found in environment variables');

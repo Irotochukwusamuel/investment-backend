@@ -15,7 +15,7 @@ export class BrevoEmailProvider implements EmailProvider {
   constructor(private readonly configService: ConfigService) {
     const apiKey = this.configService.get<string>('BREVO_API_KEY');
     this.senderEmail = this.configService.get<string>('BREVO_SENDER_EMAIL', 'noreply@kltmines.com');
-    this.senderName = this.configService.get<string>('BREVO_SENDER_NAME', 'KLT Mines Investment Platform');
+    this.senderName = this.configService.get<string>('BREVO_SENDER_NAME', 'KLTMINES Investment Platform');
 
     if (!apiKey) {
       this.logger.warn('BREVO_API_KEY not found in environment variables');

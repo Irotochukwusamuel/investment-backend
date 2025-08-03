@@ -27,7 +27,7 @@ export class ConsoleEmailProvider implements EmailProvider {
     }
 
     this.logger.log('=== CONSOLE EMAIL ===');
-    this.logger.log(`From: ${from?.name || 'KLT Mines'} <${from?.email || 'noreply@kltmines.com'}>`);
+    this.logger.log(`From: ${from?.name || 'KLTMINES'} <${from?.email || 'noreply@kltmines.com'}>`);
     this.logger.log(`To: ${to}`);
     this.logger.log(`Subject: ${subject}`);
     this.logger.log('Content:');

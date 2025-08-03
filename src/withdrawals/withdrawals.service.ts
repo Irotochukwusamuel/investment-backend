@@ -26,7 +26,7 @@ export class WithdrawalsService {
   ) {}
 
   async createWithdrawal(userId: string, createWithdrawalDto: CreateWithdrawalDto) {
-    const { amount, currency, notes } = createWithdrawalDto;
+    const { amount, currency, withdrawalMethod, notes } = createWithdrawalDto;
 
     // Check USDT withdrawal settings
     if (currency === 'usdt') {
@@ -113,6 +113,9 @@ export class WithdrawalsService {
       reference,
     });
 
+    // Determine withdrawal method - use provided method or default based on currency
+    const method = withdrawalMethod || (currency === 'naira' ? WithdrawalMethod.BANK_TRANSFER : WithdrawalMethod.CRYPTO);
+
     // Create withdrawal record
     const withdrawal = new this.withdrawalModel({
       userId: new Types.ObjectId(userId),
@@ -121,7 +124,7 @@ export class WithdrawalsService {
       fee,
       netAmount,
       status: WithdrawalStatus.PENDING,
-      withdrawalMethod: WithdrawalMethod.BANK_TRANSFER,
+      withdrawalMethod: method,
       bankDetails: {
         bankName: bankDetails.bankName,
         accountNumber: bankDetails.accountNumber,

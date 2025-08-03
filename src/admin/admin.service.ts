@@ -1764,7 +1764,7 @@ export class AdminService {
       const emailPromises = activeUsers.map(user =>
         this.emailService.sendEmail(
           user.email,
-          'Withdrawal Limits Updated - KLT Mines',
+          'Withdrawal Limits Updated - KLTMINES',
           `
           <h2>Hello ${user.firstName || user.email}!</h2>
           <p>We want to inform you about an update to our withdrawal limits.</p>
@@ -1774,7 +1774,7 @@ export class AdminService {
             <li>Maximum: ${limits.maxAmount.toLocaleString()}</li>
           </ul>
           <p>These changes are effective immediately for all new withdrawal requests.</p>
-          <p>Thank you for using KLT Mines!</p>
+          <p>Thank you for using KLTMINES!</p>
           `
         ).catch(error => {
           console.error(`Failed to send withdrawal limits email to ${user.email}:`, error);
@@ -1809,7 +1809,7 @@ export class AdminService {
       const emailPromises = activeUsers.map(user =>
         this.emailService.sendEmail(
           user.email,
-          'Deposit Limits Updated - KLT Mines',
+          'Deposit Limits Updated - KLTMINES',
           `
           <h2>Hello ${user.firstName || user.email}!</h2>
           <p>We want to inform you about an update to our deposit limits.</p>
@@ -1819,7 +1819,7 @@ export class AdminService {
             <li>Maximum: ${limits.maxAmount.toLocaleString()}</li>
           </ul>
           <p>These changes are effective immediately for all new deposit requests.</p>
-          <p>Thank you for using KLT Mines!</p>
+          <p>Thank you for using KLTMINES!</p>
           `
         ).catch(error => {
           console.error(`Failed to send deposit limits email to ${user.email}:`, error);
@@ -1856,13 +1856,13 @@ export class AdminService {
       const emailPromises = activeUsers.map(user =>
         this.emailService.sendEmail(
           user.email,
-          'Deposit Fee Updated - KLT Mines',
+          'Deposit Fee Updated - KLTMINES',
           `
           <h2>Hello ${user.firstName || user.email}!</h2>
           <p>We want to inform you about an update to our deposit fee.</p>
           <p><strong>New Deposit Fee:</strong> ${newFeePercentage}%</p>
           <p>This change affects all future deposits and is effective immediately.</p>
-          <p>Thank you for using KLT Mines!</p>
+          <p>Thank you for using KLTMINES!</p>
           `
         ).catch(error => {
           console.error(`Failed to send deposit fee update email to ${user.email}:`, error);

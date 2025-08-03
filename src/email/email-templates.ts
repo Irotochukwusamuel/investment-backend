@@ -10,14 +10,14 @@ export interface EmailTemplate {
 export const emailTemplates: Record<string, EmailTemplate> = {
   // Welcome Email Template
   welcome: {
-    subject: 'Welcome to KLT Mines Investment Platform',
+    subject: 'Welcome to KLTMINES Investment Platform',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Welcome to KLT Mines</title>
+          <title>Welcome to KLTMINES</title>
           <style>
             body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
             .container { max-width: 600px; margin: 0 auto; padding: 20px; }
@@ -30,12 +30,12 @@ export const emailTemplates: Record<string, EmailTemplate> = {
         <body>
           <div class="container">
             <div class="header">
-              <h1>🎉 Welcome to KLT Mines!</h1>
+              <h1>🎉 Welcome to KLTMINES!</h1>
               <p>Your Investment Journey Begins Here</p>
             </div>
             <div class="content">
               <h2>Hello ${data.userName}!</h2>
-              <p>Welcome to KLT Mines Investment Platform! We're thrilled to have you join our community of smart investors.</p>
+              <p>Welcome to KLTMINES Investment Platform! We're thrilled to have you join our community of smart investors.</p>
               
               <div class="highlight">
                 <h3>🚀 What's Next?</h3>
@@ -53,7 +53,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p><strong>Need Help?</strong> Our support team is here to assist you with any questions.</p>
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>This email was sent to ${data.userEmail}</p>
             </div>
           </div>
@@ -64,7 +64,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Password Reset Email Template
   passwordReset: {
-    subject: 'Password Reset OTP - KLT Mines',
+    subject: 'Password Reset OTP - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -92,7 +92,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
             </div>
             <div class="content">
               <h2>Hello ${data.userName}!</h2>
-              <p>We received a request to reset your password for your KLT Mines account.</p>
+              <p>We received a request to reset your password for your KLTMINES account.</p>
               
               <div class="otp-container">
                 <div class="otp-label">Your One-Time Password (OTP)</div>
@@ -123,7 +123,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p style="word-break: break-all; color: #007bff;">${data.resetUrl}</p>
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>This email was sent to ${data.userEmail}</p>
             </div>
           </div>
@@ -134,7 +134,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Investment Confirmation Email Template
   investmentConfirmation: {
-    subject: 'Investment Confirmation - KLT Mines',
+    subject: 'Investment Confirmation - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -201,7 +201,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>Investment ID: ${data.investmentId}</p>
             </div>
           </div>
@@ -212,7 +212,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // ROI Payment Notification Email Template
   roiPayment: {
-    subject: 'ROI Payment Received - KLT Mines',
+    subject: 'ROI Payment Received - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -256,7 +256,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>Transaction ID: ${data.transactionId}</p>
             </div>
           </div>
@@ -267,7 +267,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Transaction Confirmation Email Template
   transactionConfirmation: {
-    subject: 'Transaction ${status} - KLT Mines',
+    subject: 'Transaction ${status} - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -317,7 +317,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>Reference: ${data.reference}</p>
             </div>
           </div>
@@ -328,7 +328,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Investment Completion Email Template
   investmentCompletion: {
-    subject: 'Investment Completed - KLT Mines',
+    subject: 'Investment Completed - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -379,7 +379,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>Investment ID: ${data.investmentId}</p>
             </div>
           </div>
@@ -390,7 +390,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Referral Bonus Email Template
   referralBonus: {
-    subject: 'Referral Bonus Earned - KLT Mines',
+    subject: 'Referral Bonus Earned - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -435,7 +435,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>Referral ID: ${data.referralId}</p>
             </div>
           </div>
@@ -446,7 +446,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Welcome Bonus Email Template
   welcomeBonus: {
-    subject: 'Welcome Bonus Available - KLT Mines',
+    subject: 'Welcome Bonus Available - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -491,7 +491,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>User ID: ${data.userId}</p>
             </div>
           </div>
@@ -502,7 +502,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Account Verification Email Template
   accountVerification: {
-    subject: 'Verify Your Account - KLT Mines',
+    subject: 'Verify Your Account - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -542,7 +542,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p>If you didn't create an account with us, please ignore this email.</p>
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>This email was sent to ${data.userEmail}</p>
             </div>
           </div>
@@ -553,7 +553,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Security Alert Email Template
   securityAlert: {
-    subject: 'Security Alert - KLT Mines',
+    subject: 'Security Alert - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -604,7 +604,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p>If you recognize this activity, no action is needed.</p>
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>Alert ID: ${data.alertId}</p>
             </div>
           </div>
@@ -615,7 +615,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Login OTP Email Template
   loginOtp: {
-    subject: 'Login Verification OTP - KLT Mines',
+    subject: 'Login Verification OTP - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -644,7 +644,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
             </div>
             <div class="content">
               <h2>Hello ${data.userName}!</h2>
-              <p>We received a login request for your KLT Mines account. Please verify your identity with the OTP below.</p>
+              <p>We received a login request for your KLTMINES account. Please verify your identity with the OTP below.</p>
               
               <div class="login-info">
                 <h3>📱 Login Details</h3>
@@ -681,7 +681,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p>If you didn't attempt to login, please contact our support team immediately.</p>
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>This email was sent to ${data.userEmail}</p>
             </div>
           </div>
@@ -692,7 +692,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Withdrawal Request Email Template
   withdrawalRequest: {
-    subject: 'Withdrawal Request Received - KLT Mines',
+    subject: 'Withdrawal Request Received - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -750,7 +750,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p><strong>Need Help?</strong> If you have any questions about your withdrawal, please contact our support team.</p>
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>Reference: ${data.reference}</p>
             </div>
           </div>
@@ -761,7 +761,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Withdrawal Completed Email Template
   withdrawalCompleted: {
-    subject: 'Withdrawal Completed - KLT Mines',
+    subject: 'Withdrawal Completed - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -820,7 +820,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p><strong>Need Help?</strong> If you have any questions about this withdrawal, please contact our support team.</p>
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>Reference: ${data.reference}</p>
             </div>
           </div>
@@ -831,7 +831,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Withdrawal Failed Email Template
   withdrawalFailed: {
-    subject: 'Withdrawal Failed - KLT Mines',
+    subject: 'Withdrawal Failed - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -894,7 +894,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p><strong>Need Help?</strong> If you have any questions about this failed withdrawal, please contact our support team.</p>
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>Reference: ${data.reference}</p>
             </div>
           </div>
@@ -905,7 +905,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Withdrawal Fee Update Email Template
   withdrawalFeeUpdate: {
-    subject: 'Withdrawal Fee Updated - KLT Mines',
+    subject: 'Withdrawal Fee Updated - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -965,7 +965,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p><strong>Questions?</strong> If you have any questions about this fee update, please contact our support team.</p>
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>This email was sent to ${data.userEmail}</p>
             </div>
           </div>
@@ -976,7 +976,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Deposit Request Email Template
   depositRequest: {
-    subject: 'Deposit Request Received - KLT Mines',
+    subject: 'Deposit Request Received - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -1034,7 +1034,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p><strong>Important:</strong> Please ensure you include the reference number in your payment description to avoid delays.</p>
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>Reference: ${data.reference}</p>
             </div>
           </div>
@@ -1045,7 +1045,7 @@ export const emailTemplates: Record<string, EmailTemplate> = {
 
   // Deposit Confirmed Email Template
   depositConfirmed: {
-    subject: 'Deposit Confirmed - KLT Mines',
+    subject: 'Deposit Confirmed - KLTMINES',
     html: (data: EmailTemplateData) => `
       <!DOCTYPE html>
       <html>
@@ -1100,10 +1100,10 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               </div>
               
               
-              <p><strong>Thank you for choosing KLT Mines!</strong> We're excited to help you grow your wealth.</p>
+              <p><strong>Thank you for choosing KLTMINES!</strong> We're excited to help you grow your wealth.</p>
             </div>
             <div class="footer">
-              <p>© 2024 KLT Mines Investment Platform. All rights reserved.</p>
+              <p>© 2024 KLTMINES Investment Platform. All rights reserved.</p>
               <p>Reference: ${data.reference}</p>
             </div>
           </div>

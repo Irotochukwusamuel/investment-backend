@@ -9,7 +9,7 @@ export class AppController {
   @ApiResponse({ status: 200, description: 'Application is running' })
   getHello(): { message: string; timestamp: string } {
     return {
-      message: 'KLT Mines Investment Platform API is running',
+      message: 'KLTMINES Investment Platform API is running',
       timestamp: new Date().toISOString(),
     };
   }

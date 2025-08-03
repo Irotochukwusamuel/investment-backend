@@ -51,8 +51,8 @@ export class EmailController {
       } else {
         await this.emailService.sendEmail(
           body.to,
-          'Test Email from KLT Mines',
-          '<h1>Test Email</h1><p>This is a test email from the KLT Mines Investment Platform.</p>'
+          'Test Email from KLTMINES',
+          '<h1>Test Email</h1><p>This is a test email from the KLTMINES Investment Platform.</p>'
         );
       }
 

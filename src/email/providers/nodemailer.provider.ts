@@ -20,7 +20,7 @@ export class NodemailerEmailProvider implements EmailProvider {
     const pass = this.configService.get<string>('SMTP_PASS');
     
     this.senderEmail = this.configService.get<string>('SMTP_SENDER_EMAIL', 'noreply@kltmines.com');
-    this.senderName = this.configService.get<string>('SMTP_SENDER_NAME', 'KLT Mines Investment Platform');
+    this.senderName = this.configService.get<string>('SMTP_SENDER_NAME', 'KLTMINES Investment Platform');
 
     if (!host || !user || !pass) {
       this.logger.warn('SMTP configuration not found in environment variables');

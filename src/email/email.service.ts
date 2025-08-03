@@ -500,7 +500,7 @@ export class EmailService {
     try {
       await this.sendEmail(
         to,
-        'Email Service Test - KLT Mines',
+        'Email Service Test - KLTMINES',
         `
           <h1>Email Service Test</h1>
           <p>This is a test email to verify that the email service is working correctly.</p>
