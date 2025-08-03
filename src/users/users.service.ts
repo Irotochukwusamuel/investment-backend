@@ -70,29 +70,29 @@ export class UsersService {
 
     const now = new Date();
     
-    // Get bonus withdrawal period from settings (default to 15 days)
-    let BONUS_WAIT_DAYS = 15;
-    let BONUS_WAIT_UNIT = 'days';
-    let BONUS_WAIT_MS = 15 * 24 * 60 * 60 * 1000; // 15 days in milliseconds
+    // Get bonus withdrawal period from settings (default to 15 minutes)
+    let BONUS_WAIT_VALUE = 15;
+    let BONUS_WAIT_UNIT = 'minutes';
+    let BONUS_WAIT_MS = 15 * 60 * 1000; // 15 minutes in milliseconds
     
     try {
       const settings = await this.settingsModel.findOne({ key: 'platform' });
       if (settings?.value?.bonusWithdrawalPeriod) {
-        BONUS_WAIT_DAYS = settings.value.bonusWithdrawalPeriod;
-        BONUS_WAIT_UNIT = settings.value.bonusWithdrawalUnit || 'days';
-        BONUS_WAIT_MS = settings.value.bonusWithdrawalPeriodMs || (BONUS_WAIT_DAYS * 24 * 60 * 60 * 1000);
+        BONUS_WAIT_VALUE = settings.value.bonusWithdrawalPeriod;
+        BONUS_WAIT_UNIT = settings.value.bonusWithdrawalUnit || 'minutes';
+        BONUS_WAIT_MS = settings.value.bonusWithdrawalPeriodMs || (BONUS_WAIT_VALUE * 60 * 1000); // Default to minutes
       }
     } catch (error) {
       console.error('Error fetching bonus withdrawal period from settings:', error);
-      // Fallback to default 15 days
+      // Fallback to default 15 minutes
     }
 
     // If user has never had an active investment, they can't withdraw
     if (!user.firstActiveInvestmentDate) {
       return { 
         canWithdraw: false, 
-        daysLeft: BONUS_WAIT_DAYS,
-        timeLeft: `${BONUS_WAIT_DAYS} ${BONUS_WAIT_UNIT}`
+        daysLeft: BONUS_WAIT_VALUE,
+        timeLeft: `${BONUS_WAIT_VALUE} ${BONUS_WAIT_UNIT}`
       };
     }
 

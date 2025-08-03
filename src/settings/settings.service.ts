@@ -22,6 +22,8 @@ export class SettingsService {
       maintenance: { maintenanceMode: false, maintenanceMessage: '' },
       autoPayout: false,
       bonusWithdrawalPeriod: 15,
+      bonusWithdrawalUnit: 'minutes',
+      bonusWithdrawalPeriodMs: 15 * 60 * 1000, // 15 minutes in milliseconds
       // USDT Feature Toggles
       usdtWithdrawalEnabled: false,
       usdtInvestmentEnabled: false,
@@ -84,10 +86,28 @@ export class SettingsService {
 
   async getBonusWithdrawalPeriod() {
     const settings = await this.getSettings();
+    const value = settings.bonusWithdrawalPeriod ?? 15;
+    const unit = settings.bonusWithdrawalUnit ?? 'days';
+    
+    // Calculate periodMs based on the unit
+    let periodMs: number;
+    switch (unit) {
+      case 'minutes':
+        periodMs = value * 60 * 1000;
+        break;
+      case 'hours':
+        periodMs = value * 60 * 60 * 1000;
+        break;
+      case 'days':
+      default:
+        periodMs = value * 24 * 60 * 60 * 1000;
+        break;
+    }
+    
     return {
-      bonusWithdrawalPeriod: settings.bonusWithdrawalPeriod ?? 15,
-      bonusWithdrawalUnit: settings.bonusWithdrawalUnit ?? 'days',
-      bonusWithdrawalPeriodMs: settings.bonusWithdrawalPeriodMs ?? (15 * 24 * 60 * 60 * 1000),
+      bonusWithdrawalPeriod: value,
+      bonusWithdrawalUnit: unit,
+      bonusWithdrawalPeriodMs: settings.bonusWithdrawalPeriodMs ?? periodMs,
     };
   }
 

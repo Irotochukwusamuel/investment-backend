@@ -669,23 +669,23 @@ export class InvestmentsService {
     
     if (!bonusStatus.canWithdraw) {
       // Get bonus withdrawal period from settings for the error message
-      let BONUS_WAIT_DAYS = 15;
-      let BONUS_WAIT_UNIT = 'days';
+      let BONUS_WAIT_VALUE = 15;
+      let BONUS_WAIT_UNIT = 'minutes';
       
       try {
         const settings = await this.settingsModel.findOne({ key: 'platform' });
         if (settings?.value?.bonusWithdrawalPeriod) {
-          BONUS_WAIT_DAYS = settings.value.bonusWithdrawalPeriod;
-          BONUS_WAIT_UNIT = settings.value.bonusWithdrawalUnit || 'days';
+          BONUS_WAIT_VALUE = settings.value.bonusWithdrawalPeriod;
+          BONUS_WAIT_UNIT = settings.value.bonusWithdrawalUnit || 'minutes';
         }
       } catch (error) {
         console.error('Error fetching bonus withdrawal period from settings:', error);
-        // Fallback to default 15 days
+        // Fallback to default 15 minutes
       }
       
       return {
         success: false,
-        message: `Bonus can only be withdrawn after ${BONUS_WAIT_DAYS} ${BONUS_WAIT_UNIT} of active investment. You have ${bonusStatus.timeLeft || bonusStatus.daysLeft + ' days'} remaining.`
+        message: `Bonus can only be withdrawn after ${BONUS_WAIT_VALUE} ${BONUS_WAIT_UNIT} of active investment. You have ${bonusStatus.timeLeft || bonusStatus.daysLeft + ' ' + BONUS_WAIT_UNIT} remaining.`
       };
     }
 
