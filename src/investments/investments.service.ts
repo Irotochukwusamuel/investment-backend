@@ -738,21 +738,20 @@ export class InvestmentsService {
       };
     }
 
-    // Calculate total daily ROI from all active investments
-    let totalDailyRoi = 0;
+    // Calculate total earned ROI from all active investments
+    let totalEarnedRoi = 0;
     let currency: 'naira' | 'usdt' = 'naira'; // Default currency
 
     for (const investment of activeInvestments) {
-      // Calculate daily ROI for this investment
-      const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
-      totalDailyRoi += dailyRoiAmount;
+      // Use the earnedAmount field instead of recalculating
+      totalEarnedRoi += investment.earnedAmount || 0;
       currency = investment.currency; // Use the currency of the first investment
     }
 
-    if (totalDailyRoi <= 0) {
+    if (totalEarnedRoi <= 0) {
       return {
         success: false,
-        message: 'No daily ROI available to withdraw.'
+        message: 'No daily ROI available to withdraw. ROI accumulates over time and will be available for withdrawal.'
       };
     }
 
@@ -765,19 +764,34 @@ export class InvestmentsService {
       };
     }
 
-    // Add daily ROI to available balance
+    // Add earned ROI to available balance
     if (currency === 'naira') {
-      wallet.nairaBalance += totalDailyRoi;
+      wallet.nairaBalance += totalEarnedRoi;
     } else {
-      wallet.usdtBalance += totalDailyRoi;
+      wallet.usdtBalance += totalEarnedRoi;
     }
     await wallet.save();
+
+    // Reset earnedAmount to 0 for all active investments after withdrawal
+    for (const investment of activeInvestments) {
+      if (investment.earnedAmount > 0) {
+        await this.investmentModel.findByIdAndUpdate(
+          investment._id,
+          { 
+            $set: { 
+              earnedAmount: 0,
+              lastRoiUpdate: new Date()
+            }
+          }
+        );
+      }
+    }
 
     // Create transaction record
     await this.transactionsService.create({
       userId,
       type: TransactionType.ROI,
-      amount: totalDailyRoi,
+      amount: totalEarnedRoi,
       currency,
       description: 'Daily ROI withdrawal',
       status: TransactionStatus.SUCCESS,
@@ -785,8 +799,8 @@ export class InvestmentsService {
 
     return {
       success: true,
-      message: `Successfully withdrawn ${totalDailyRoi.toFixed(2)} ${currency.toUpperCase()} in daily ROI.`,
-      amount: totalDailyRoi
+      message: `Successfully withdrawn ${totalEarnedRoi.toFixed(2)} ${currency.toUpperCase()} in daily ROI.`,
+      amount: totalEarnedRoi
     };
   }
 

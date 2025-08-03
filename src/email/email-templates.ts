@@ -419,14 +419,14 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p>You've earned a referral bonus! Someone you referred has made their first investment.</p>
               
               <div class="bonus-amount">
-                +${data.currency} ${data.bonusAmount.toLocaleString()}
+                +${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.bonusAmount.toLocaleString()}
               </div>
               <p style="text-align: center; font-size: 1.2em; color: #ffc107;">Referral Bonus</p>
               
               <div class="bonus-details">
                 <h3>🎯 Referral Details</h3>
                 <p><strong>Referred User:</strong> ${data.referredUserName}</p>
-                <p><strong>Investment Amount:</strong> ${data.currency} ${data.referredInvestmentAmount.toLocaleString()}</p>
+                <p><strong>Investment Amount:</strong> ${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.referredInvestmentAmount.toLocaleString()}</p>
                 <p><strong>Bonus Percentage:</strong> ${data.bonusPercentage}%</p>
                 <p><strong>Date Earned:</strong> ${new Date(data.dateEarned).toLocaleDateString()}</p>
               </div>
@@ -475,14 +475,14 @@ export const emailTemplates: Record<string, EmailTemplate> = {
               <p>Great news! Your welcome bonus is now available for withdrawal.</p>
               
               <div class="bonus-amount">
-                ${data.currency} ${data.bonusAmount.toLocaleString()}
+                ${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.bonusAmount.toLocaleString()}
               </div>
               <p style="text-align: center; font-size: 1.2em; color: #6f42c1;">Welcome Bonus</p>
               
               <div class="bonus-info">
                 <h3>🎁 Bonus Details</h3>
                 <p><strong>Bonus Type:</strong> Welcome Bonus</p>
-                <p><strong>Amount:</strong> ${data.currency} ${data.bonusAmount.toLocaleString()}</p>
+                <p><strong>Amount:</strong> ${data.currency === 'naira' ? '₦' : data.currency.toUpperCase()} ${data.bonusAmount.toLocaleString()}</p>
                 <p><strong>Available Since:</strong> ${new Date(data.availableDate).toLocaleDateString()}</p>
                 <p><strong>Expires:</strong> Never (bonus doesn't expire)</p>
               </div>
