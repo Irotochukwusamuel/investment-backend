@@ -18,6 +18,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 export class TasksService {
   private readonly logger = new Logger(TasksService.name);
   private readonly fintavaClient: AxiosInstance;
+  private readonly cronDisabled: boolean;
 
   constructor(
     @InjectModel(Investment.name) private investmentModel: Model<InvestmentDocument>,
@@ -29,6 +30,13 @@ export class TasksService {
     private readonly notificationsService: NotificationsService,
     private readonly eventEmitter: EventEmitter2,
   ) {
+    // Check if cron jobs are disabled (for cPanel environment)
+    this.cronDisabled = process.env.NODE_ENV === 'production' && process.env.CPANEL_DISABLE_CRON === 'true';
+    
+    if (this.cronDisabled) {
+      this.logger.warn('Cron jobs are disabled for cPanel environment. Set CPANEL_DISABLE_CRON=false to enable.');
+    }
+
     // Initialize FINTAVA client
     const apiKey = this.configService.get<string>('FINTAVA_API_KEY');
     const baseUrl = this.configService.get<string>('FINTAVA_BASE_URL', 'https://dev.fintavapay.com/api/dev');
@@ -51,6 +59,12 @@ export class TasksService {
 
   @Cron(CronExpression.EVERY_HOUR)
   async updateInvestmentRoi() {
+    // Skip if cron is disabled
+    if (this.cronDisabled) {
+      this.logger.debug('Skipping updateInvestmentRoi - cron disabled');
+      return;
+    }
+
     this.logger.log('Starting hourly ROI update task');
     
     try {
@@ -165,6 +179,12 @@ export class TasksService {
 
   @Cron(CronExpression.EVERY_5_MINUTES)
   async processPendingTransactions() {
+    // Skip if cron is disabled
+    if (this.cronDisabled) {
+      this.logger.debug('Skipping processPendingTransactions - cron disabled');
+      return;
+    }
+
     this.logger.log('Starting pending transactions processing task');
     
     try {
@@ -224,6 +244,12 @@ export class TasksService {
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async cleanupOldData() {
+    // Skip if cron is disabled
+    if (this.cronDisabled) {
+      this.logger.debug('Skipping cleanupOldData - cron disabled');
+      return;
+    }
+
     this.logger.log('Starting daily cleanup task');
     
     try {
@@ -242,6 +268,12 @@ export class TasksService {
 
   @Cron(CronExpression.EVERY_WEEK)
   async generateWeeklyReports() {
+    // Skip if cron is disabled
+    if (this.cronDisabled) {
+      this.logger.debug('Skipping generateWeeklyReports - cron disabled');
+      return;
+    }
+
     this.logger.log('Starting weekly report generation task');
     
     try {

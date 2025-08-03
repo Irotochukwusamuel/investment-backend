@@ -28,13 +28,13 @@ jobs:
     - name: Copy .htaccess
       run: cp .htaccess dist/.htaccess
       
-    - name: Deploy to cPanel
+    - name: Deploy to cPanel Backend Folder
       uses: SamKirkland/FTP-Deploy-Action@v4.3.4
       with:
         server: ${{ secrets.CPANEL_SERVER }}
         username: ${{ secrets.CPANEL_USERNAME }}
         password: ${{ secrets.CPANEL_PASSWORD }}
-        server-dir: /public_html/api/
+        server-dir: /backend/
         local-dir: ./
         exclude: |
           **/.git*

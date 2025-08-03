@@ -1,7 +1,7 @@
 ---
 deployment:
   tasks:
-    - export DEPLOYPATH=/public_html/api/
+    - export DEPLOYPATH=/backend/
     - export NODE_ENV=production
     - /bin/cp -R dist/* $DEPLOYPATH
     - /bin/cp package.json $DEPLOYPATH
