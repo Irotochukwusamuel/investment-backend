@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -15,10 +15,9 @@ import { NotificationType } from '../notifications/schemas/notification.schema';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
-export class TasksService {
+export class TasksService implements OnModuleInit {
   private readonly logger = new Logger(TasksService.name);
   private readonly fintavaClient: AxiosInstance;
-  private readonly cronDisabled: boolean;
 
   constructor(
     @InjectModel(Investment.name) private investmentModel: Model<InvestmentDocument>,
@@ -30,13 +29,6 @@ export class TasksService {
     private readonly notificationsService: NotificationsService,
     private readonly eventEmitter: EventEmitter2,
   ) {
-    // Check if cron jobs are disabled (for cPanel environment)
-    this.cronDisabled = process.env.NODE_ENV === 'production' && process.env.CPANEL_DISABLE_CRON === 'true';
-    
-    if (this.cronDisabled) {
-      this.logger.warn('Cron jobs are disabled for cPanel environment. Set CPANEL_DISABLE_CRON=false to enable.');
-    }
-
     // Initialize FINTAVA client
     const apiKey = this.configService.get<string>('FINTAVA_API_KEY');
     const baseUrl = this.configService.get<string>('FINTAVA_BASE_URL', 'https://dev.fintavapay.com/api/dev');
@@ -57,15 +49,27 @@ export class TasksService {
     });
   }
 
-  @Cron(CronExpression.EVERY_HOUR)
-  async updateInvestmentRoi() {
-    // Skip if cron is disabled
-    if (this.cronDisabled) {
-      this.logger.debug('Skipping updateInvestmentRoi - cron disabled');
-      return;
-    }
+  async onModuleInit() {
+    this.logger.log('🚀 TasksService initialized - Cron jobs are ready!');
+    this.logger.log('📅 Scheduled cron jobs:');
+    this.logger.log('   - ROI updates (every minute)');
+    this.logger.log('   - Pending transactions processing (every 5 minutes)');
+    this.logger.log('   - Daily cleanup (midnight)');
+    this.logger.log('   - Weekly reports (every week)');
+  }
 
-    this.logger.log('Starting hourly ROI update task');
+  // Manual trigger method for testing
+  async triggerRoiUpdate() {
+    this.logger.log('🔧 Manually triggering ROI update...');
+    await this.updateInvestmentRoi();
+  }
+
+  @Cron(CronExpression.EVERY_MINUTE, {
+    name: 'updateInvestmentRoi',
+    timeZone: 'Africa/Lagos'
+  })
+  async updateInvestmentRoi() {
+    this.logger.log('🔄 Starting hourly ROI update task');
     
     try {
       const activeInvestments = await this.investmentModel.find({
@@ -74,13 +78,19 @@ export class TasksService {
         nextRoiUpdate: { $lte: new Date() },
       }).populate('userId', 'email firstName lastName').populate('planId', 'name');
 
+      this.logger.log(`📊 Found ${activeInvestments.length} active investments that need ROI updates`);
+
+      let updatedCount = 0;
       for (const investment of activeInvestments) {
         try {
+          this.logger.log(`💰 Processing investment ${investment._id}: ${investment.amount} ${investment.currency}`);
+          
           // Calculate hourly ROI (daily ROI divided by 24 hours)
           const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
           const hourlyRoiAmount = dailyRoiAmount / 24;
           
           // Update investment ROI
+          const oldEarnedAmount = investment.earnedAmount;
           investment.earnedAmount += hourlyRoiAmount;
           investment.lastRoiUpdate = new Date();
           
@@ -89,9 +99,12 @@ export class TasksService {
           nextRoiUpdate.setHours(nextRoiUpdate.getHours() + 1);
           investment.nextRoiUpdate = nextRoiUpdate;
           
+          this.logger.log(`✅ Updated earned amount from ${oldEarnedAmount} to ${investment.earnedAmount}`);
+          
           // Check if investment is completed
           if (new Date() >= investment.endDate) {
             investment.status = InvestmentStatus.COMPLETED;
+            this.logger.log(`🎉 Investment ${investment._id} completed!`);
             
             // Create completion transaction
             const completionTransaction = await this.createRoiTransaction(investment, hourlyRoiAmount, 'completion');
@@ -148,17 +161,20 @@ export class TasksService {
           }
           
           await investment.save();
+          updatedCount++;
           
           // Update user's main wallet with ROI
+          const userIdString = investment.userId.toString();
+          
           if (investment.currency === 'naira') {
-            await this.walletService.deposit(investment.userId.toString(), {
+            await this.walletService.deposit(userIdString, {
               walletType: WalletType.MAIN,
               amount: hourlyRoiAmount,
               currency: 'naira',
               description: `Hourly ROI payment for investment`,
             });
           } else {
-            await this.walletService.deposit(investment.userId.toString(), {
+            await this.walletService.deposit(userIdString, {
               walletType: WalletType.MAIN,
               amount: hourlyRoiAmount,
               currency: 'usdt',
@@ -166,26 +182,25 @@ export class TasksService {
             });
           }
           
+          this.logger.log(`✅ Successfully updated investment ${investment._id}`);
+          
         } catch (error) {
-          this.logger.error(`Error updating ROI for investment ${investment._id}:`, error);
+          this.logger.error(`❌ Error updating ROI for investment ${investment._id}:`, error);
         }
       }
       
-      this.logger.log(`Updated ROI for ${activeInvestments.length} investments`);
+      this.logger.log(`🎯 ROI update completed: ${updatedCount}/${activeInvestments.length} investments updated`);
     } catch (error) {
-      this.logger.error('Error in updateInvestmentRoi task:', error);
+      this.logger.error('❌ Error in updateInvestmentRoi task:', error);
     }
   }
 
-  @Cron(CronExpression.EVERY_5_MINUTES)
+  @Cron(CronExpression.EVERY_5_MINUTES, {
+    name: 'processPendingTransactions',
+    timeZone: 'Africa/Lagos'
+  })
   async processPendingTransactions() {
-    // Skip if cron is disabled
-    if (this.cronDisabled) {
-      this.logger.debug('Skipping processPendingTransactions - cron disabled');
-      return;
-    }
-
-    this.logger.log('Starting pending transactions processing task');
+    this.logger.log('🔄 Starting pending transactions processing task');
     
     try {
       const pendingTransactions = await this.transactionModel.find({
@@ -193,6 +208,9 @@ export class TasksService {
         createdAt: { $lt: new Date(Date.now() - 30 * 60 * 1000) }, // Older than 30 minutes
       }).populate('userId', 'email firstName lastName');
 
+      this.logger.log(`📊 Found ${pendingTransactions.length} pending transactions to process`);
+
+      let processedCount = 0;
       for (const transaction of pendingTransactions) {
         try {
           // Check if transaction is overdue
@@ -201,7 +219,7 @@ export class TasksService {
             transaction.failedAt = new Date();
             transaction.failureReason = 'Transaction timeout - overdue';
             await transaction.save();
-            this.logger.warn(`Marked overdue transaction ${transaction._id} as failed`);
+            this.logger.warn(`⚠️ Marked overdue transaction ${transaction._id} as failed`);
             continue;
           }
 
@@ -217,40 +235,27 @@ export class TasksService {
               await this.processInvestmentTransaction(transaction);
               break;
             default:
-              this.logger.warn(`Unknown transaction type: ${transaction.type}`);
+              this.logger.warn(`⚠️ Unknown transaction type: ${transaction.type}`);
           }
-        } catch (error) {
-          this.logger.error(`Error processing transaction ${transaction._id}:`, error);
           
-          // Increment retry count
-          transaction.retryCount += 1;
-          if (transaction.retryCount >= 3) {
-            transaction.status = TransactionStatus.FAILED;
-            transaction.failedAt = new Date();
-            transaction.failureReason = `Max retries exceeded: ${error.message}`;
-            await transaction.save();
-          } else {
-            transaction.nextRetryAt = new Date(Date.now() + (transaction.retryCount * 30 * 60 * 1000));
-            await transaction.save();
-          }
+          processedCount++;
+        } catch (error) {
+          this.logger.error(`❌ Error processing transaction ${transaction._id}:`, error);
         }
       }
       
-      this.logger.log(`Processed ${pendingTransactions.length} pending transactions`);
+      this.logger.log(`🎯 Transaction processing completed: ${processedCount}/${pendingTransactions.length} transactions processed`);
     } catch (error) {
-      this.logger.error('Error in processPendingTransactions task:', error);
+      this.logger.error('❌ Error in processPendingTransactions task:', error);
     }
   }
 
-  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, {
+    name: 'cleanupOldData',
+    timeZone: 'Africa/Lagos'
+  })
   async cleanupOldData() {
-    // Skip if cron is disabled
-    if (this.cronDisabled) {
-      this.logger.debug('Skipping cleanupOldData - cron disabled');
-      return;
-    }
-
-    this.logger.log('Starting daily cleanup task');
+    this.logger.log('🔄 Starting daily cleanup task');
     
     try {
       // Clean up old failed transactions (older than 30 days)
@@ -260,49 +265,48 @@ export class TasksService {
         createdAt: { $lt: thirtyDaysAgo },
       });
       
-      this.logger.log(`Cleaned up ${deletedTransactions.deletedCount} old failed transactions`);
+      this.logger.log(`🧹 Cleaned up ${deletedTransactions.deletedCount} old failed transactions`);
     } catch (error) {
-      this.logger.error('Error in cleanupOldData task:', error);
+      this.logger.error('❌ Error in cleanupOldData task:', error);
     }
   }
 
-  @Cron(CronExpression.EVERY_WEEK)
+  @Cron(CronExpression.EVERY_WEEK, {
+    name: 'generateWeeklyReports',
+    timeZone: 'Africa/Lagos'
+  })
   async generateWeeklyReports() {
-    // Skip if cron is disabled
-    if (this.cronDisabled) {
-      this.logger.debug('Skipping generateWeeklyReports - cron disabled');
-      return;
-    }
-
-    this.logger.log('Starting weekly report generation task');
+    this.logger.log('🔄 Starting weekly reports generation task');
     
     try {
-      const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      
-      // Get weekly statistics
-      const weeklyStats = await this.transactionModel.aggregate([
+      // Generate weekly investment reports
+      const weeklyStats = await this.investmentModel.aggregate([
         {
           $match: {
-            createdAt: { $gte: oneWeekAgo },
-            status: TransactionStatus.SUCCESS,
+            createdAt: {
+              $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+            }
           }
         },
         {
           $group: {
-            _id: '$type',
-            count: { $sum: 1 },
+            _id: null,
+            totalInvestments: { $sum: 1 },
             totalAmount: { $sum: '$amount' },
+            totalEarnings: { $sum: '$earnedAmount' },
+            activeInvestments: {
+              $sum: { $cond: [{ $eq: ['$status', InvestmentStatus.ACTIVE] }, 1, 0] }
+            },
+            completedInvestments: {
+              $sum: { $cond: [{ $eq: ['$status', InvestmentStatus.COMPLETED] }, 1, 0] }
+            }
           }
         }
       ]);
       
-      this.logger.log('Weekly statistics:', weeklyStats);
-      
-      // Here you could send weekly reports to admin or store them
-      // await this.emailService.sendWeeklyReport(adminEmail, weeklyStats);
-      
+      this.logger.log('📊 Weekly investment stats:', weeklyStats[0] || {});
     } catch (error) {
-      this.logger.error('Error in generateWeeklyReports task:', error);
+      this.logger.error('❌ Error in generateWeeklyReports task:', error);
     }
   }
 

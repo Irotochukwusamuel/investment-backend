@@ -257,6 +257,22 @@ export class ReferralsService {
     return referral.save();
   }
 
+  async markAllReferralBonusesAsPaid(referrerId: string): Promise<void> {
+    // Find all referrals by this user that have unpaid bonuses
+    const referrals = await this.referralModel.find({
+      referrerId: new Types.ObjectId(referrerId),
+      bonusPaid: false,
+      referralBonus: { $gt: 0 }
+    });
+
+    // Mark all as paid
+    for (const referral of referrals) {
+      referral.bonusPaid = true;
+      referral.bonusPaidAt = new Date();
+      await referral.save();
+    }
+  }
+
   async getReferralsWithDetails(referrerId: string): Promise<any[]> {
     const referrals = await this.referralModel.find({
       referrerId: new Types.ObjectId(referrerId)

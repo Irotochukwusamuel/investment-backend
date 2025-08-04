@@ -5,6 +5,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { Investment, InvestmentSchema } from '../investments/schemas/investment.schema';
 import { Transaction, TransactionSchema } from '../transactions/schemas/transaction.schema';
 import { TasksService } from './tasks.service';
+import { TasksController } from './tasks.controller';
 import { WalletModule } from '../wallet/wallet.module';
 import { EmailModule } from '../email/email.module';
 import { TransactionsModule } from '../transactions/transactions.module';
@@ -12,10 +13,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
-    // Conditionally enable ScheduleModule only if not in cPanel environment
-    ...(process.env.NODE_ENV === 'production' && process.env.CPANEL_DISABLE_CRON !== 'true' 
-      ? [ScheduleModule.forRoot()] 
-      : []),
+    ScheduleModule.forRoot(),
     EventEmitterModule.forRoot(),
     MongooseModule.forFeature([
       { name: Investment.name, schema: InvestmentSchema },
@@ -26,6 +24,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     TransactionsModule,
     NotificationsModule,
   ],
+  controllers: [TasksController],
   providers: [TasksService],
   exports: [TasksService],
 })

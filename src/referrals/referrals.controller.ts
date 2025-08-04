@@ -154,4 +154,15 @@ export class ReferralsController {
   async updateReferralStats(@Param('userId') userId: string): Promise<void> {
     return this.referralsService.updateReferralStats(userId);
   }
+
+  @Get('stats/:referrerId')
+  async getReferralStats(@Param('referrerId') referrerId: string) {
+    return this.referralsService.getReferralStats(referrerId);
+  }
+
+  @Post('mark-bonuses-paid/:referrerId')
+  async markAllBonusesAsPaid(@Param('referrerId') referrerId: string) {
+    await this.referralsService.markAllReferralBonusesAsPaid(referrerId);
+    return { success: true, message: 'All referral bonuses marked as paid' };
+  }
 } 

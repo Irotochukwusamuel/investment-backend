@@ -63,22 +63,23 @@ export class WithdrawalsService {
         throw new BadRequestException('Wallet not found');
       }
 
-      // Check if user has sufficient earnings (not deposits)
-      const availableEarnings = wallet.totalEarnings || 0;
+      // Check if user has sufficient earnings (ROI earnings + bonuses)
+      const availableEarnings = (wallet.totalEarnings || 0) + (wallet.totalBonuses || 0);
       if (availableEarnings < amount) {
         throw new BadRequestException(
-          `Insufficient earnings. You can only withdraw your ROI earnings (₦${availableEarnings.toLocaleString()}), not your deposited amounts.`
+          `Insufficient earnings. You can only withdraw your ROI earnings and bonuses (₦${availableEarnings.toLocaleString()}), not your deposited amounts.`
         );
       }
 
-      // Additional check: Ensure user is not trying to withdraw more than their earnings
+      // Additional check: Ensure user is not trying to withdraw more than their earnings + bonuses
       const currentBalance = currency === 'naira' ? wallet.nairaBalance : wallet.usdtBalance;
       const totalDeposits = wallet.totalDeposits || 0;
-      const actualEarnings = currentBalance - totalDeposits;
+      const totalBonuses = wallet.totalBonuses || 0;
+      const actualEarnings = currentBalance - totalDeposits + totalBonuses;
       
       if (actualEarnings < amount) {
         throw new BadRequestException(
-          `Insufficient earnings. You can only withdraw your ROI earnings (₦${actualEarnings.toLocaleString()}), not your deposited amounts.`
+          `Insufficient earnings. You can only withdraw your ROI earnings and bonuses (₦${actualEarnings.toLocaleString()}), not your deposited amounts.`
         );
       }
     }

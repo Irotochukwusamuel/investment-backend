@@ -715,6 +715,9 @@ export class InvestmentsService {
     // Record the bonus withdrawal
     await this.usersService.recordBonusWithdrawal(userId);
 
+    // Mark all referral bonuses as paid
+    await this.referralsService.markAllReferralBonusesAsPaid(userId);
+
     // Create transaction record
     await this.transactionsService.create({
       userId,
