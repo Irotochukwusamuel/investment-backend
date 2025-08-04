@@ -104,9 +104,8 @@ WalletSchema.virtual('totalBalanceNaira').get(function() {
 
 // Virtual for total balance in USDT
 WalletSchema.virtual('totalBalanceUsdt').get(function() {
-  // Assuming 1 USDT = 1500 Naira (you can make this dynamic)
-  const nairaInUsdt = this.nairaBalance / 1500;
-  return this.usdtBalance + nairaInUsdt;
+  // Only return the actual USDT balance, don't convert Naira to USDT
+  return this.usdtBalance;
 });
 
 // Ensure virtual fields are serialized
