@@ -276,8 +276,11 @@ export class Transaction {
 export const TransactionSchema = SchemaFactory.createForClass(Transaction);
 
 // Indexes for better query performance
-TransactionSchema.index({ userId: 1, status: 1 });
-TransactionSchema.index({ type: 1, status: 1 });
+TransactionSchema.index({ userId: 1, type: 1, status: 1 });
+TransactionSchema.index({ type: 1, status: 1, createdAt: -1 });
+TransactionSchema.index({ reference: 1 }, { unique: true });
+TransactionSchema.index({ investmentId: 1, type: 1, createdAt: -1 });
+TransactionSchema.index({ userId: 1, investmentId: 1, type: 1, amount: 1, createdAt: -1 }); // Prevent duplicate ROI transactions
 TransactionSchema.index({ status: 1, createdAt: -1 });
 TransactionSchema.index({ reference: 1 });
 TransactionSchema.index({ externalReference: 1 });

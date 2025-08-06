@@ -55,6 +55,7 @@ export class TasksService implements OnModuleInit {
     this.logger.log('   - ROI updates (every minute)');
     this.logger.log('   - Pending transactions processing (every 5 minutes)');
     this.logger.log('   - Daily cleanup (midnight)');
+    this.logger.log('   - Daily ROI reset (midnight)');
     this.logger.log('   - Weekly reports (every week)');
   }
 
@@ -64,22 +65,25 @@ export class TasksService implements OnModuleInit {
     await this.updateInvestmentRoi();
   }
 
-  @Cron(CronExpression.EVERY_MINUTE, {
+  @Cron(CronExpression.EVERY_10_SECONDS, {
     name: 'updateInvestmentRoi',
     timeZone: 'Africa/Lagos'
   })
   async updateInvestmentRoi() {
     this.logger.log('🔄 Starting hourly ROI update task');
     
+    // Use a Set to track investments being processed to prevent concurrent processing
+    const processingInvestments = new Set<string>();
+    
     try {
       const activeInvestments = await this.investmentModel.find({
         status: InvestmentStatus.ACTIVE,
         endDate: { $gt: new Date() },
         nextRoiUpdate: { $lte: new Date() },
-        // Prevent processing investments that were updated in the last 5 minutes
+        // Prevent processing investments that were updated in the last 2 minutes
         $or: [
           { lastRoiUpdate: { $exists: false } },
-          { lastRoiUpdate: { $lt: new Date(Date.now() - 5 * 60 * 1000) } }
+          { lastRoiUpdate: { $lt: new Date(Date.now() - 2 * 60 * 1000) } }
         ]
       }).populate('userId', 'email firstName lastName').populate('planId', 'name');
 
@@ -87,6 +91,17 @@ export class TasksService implements OnModuleInit {
 
       let updatedCount = 0;
       for (const investment of activeInvestments) {
+        const investmentId = investment._id.toString();
+        
+        // Skip if already being processed
+        if (processingInvestments.has(investmentId)) {
+          this.logger.log(`⏭️ Skipping investment ${investmentId} - already being processed`);
+          continue;
+        }
+        
+        // Mark as being processed
+        processingInvestments.add(investmentId);
+        
         try {
           this.logger.log(`💰 Processing investment ${investment._id}: ${investment.amount} ${investment.currency}`);
           
@@ -94,9 +109,25 @@ export class TasksService implements OnModuleInit {
           const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
           const hourlyRoiAmount = dailyRoiAmount / 24;
           
+          // Check if we need to reset daily earnings (new day)
+          const now = new Date();
+          const lastUpdate = investment.lastRoiUpdate || investment.startDate;
+          const isNewDay = now.getDate() !== lastUpdate.getDate() || 
+                          now.getMonth() !== lastUpdate.getMonth() || 
+                          now.getFullYear() !== lastUpdate.getFullYear();
+          
           // Update investment ROI
           const oldEarnedAmount = investment.earnedAmount;
-          investment.earnedAmount += hourlyRoiAmount;
+          
+          if (isNewDay) {
+            // Reset earnedAmount for new day, but keep totalAccumulatedRoi
+            investment.earnedAmount = hourlyRoiAmount;
+            this.logger.log(`🔄 New day detected - resetting daily earnings for investment ${investment._id}`);
+          } else {
+            // Continue accumulating for the same day
+            investment.earnedAmount += hourlyRoiAmount;
+          }
+          
           investment.totalAccumulatedRoi += hourlyRoiAmount; // Track total accumulated ROI
           investment.lastRoiUpdate = new Date();
           
@@ -192,6 +223,9 @@ export class TasksService implements OnModuleInit {
           
         } catch (error) {
           this.logger.error(`❌ Error updating ROI for investment ${investment._id}:`, error);
+        } finally {
+          // Remove from processing set after completion or error
+          processingInvestments.delete(investmentId);
         }
       }
       
@@ -277,6 +311,43 @@ export class TasksService implements OnModuleInit {
     }
   }
 
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, {
+    name: 'resetDailyRoiEarnings',
+    timeZone: 'Africa/Lagos'
+  })
+  async resetDailyRoiEarnings() {
+    this.logger.log('🔄 Starting daily ROI earnings reset task');
+    
+    try {
+      const activeInvestments = await this.investmentModel.find({
+        status: InvestmentStatus.ACTIVE
+      });
+
+      this.logger.log(`📊 Found ${activeInvestments.length} active investments to reset daily earnings`);
+
+      let resetCount = 0;
+      for (const investment of activeInvestments) {
+        try {
+          // Reset earnedAmount to 0 for new day
+          const oldEarnedAmount = investment.earnedAmount;
+          investment.earnedAmount = 0;
+          investment.lastRoiUpdate = new Date();
+          
+          await investment.save();
+          resetCount++;
+          
+          this.logger.log(`✅ Reset daily earnings for investment ${investment._id}: ${oldEarnedAmount} → 0`);
+        } catch (error) {
+          this.logger.error(`❌ Error resetting daily earnings for investment ${investment._id}:`, error);
+        }
+      }
+      
+      this.logger.log(`🎯 Daily ROI reset completed: ${resetCount}/${activeInvestments.length} investments reset`);
+    } catch (error) {
+      this.logger.error('❌ Error in resetDailyRoiEarnings task:', error);
+    }
+  }
+
   @Cron(CronExpression.EVERY_WEEK, {
     name: 'generateWeeklyReports',
     timeZone: 'Africa/Lagos'
@@ -317,21 +388,37 @@ export class TasksService implements OnModuleInit {
   }
 
   private async createRoiTransaction(investment: InvestmentDocument, amount: number, type: 'daily' | 'completion' | 'hourly'): Promise<TransactionDocument> {
-    // Check if a similar transaction already exists for this investment within the last hour
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    // Check if a similar transaction already exists for this investment within the last 5 minutes
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     const existingTransaction = await this.transactionModel.findOne({
       userId: investment.userId,
       investmentId: investment._id,
       type: 'roi',
       status: TransactionStatus.SUCCESS,
-      createdAt: { $gte: oneHourAgo },
-      amount: amount,
+      createdAt: { $gte: fiveMinutesAgo },
+      // Use a range for amount to handle floating point precision issues
+      amount: { $gte: amount * 0.99, $lte: amount * 1.01 },
       currency: investment.currency
     });
 
     if (existingTransaction) {
-      this.logger.log(`Skipping duplicate ROI transaction for investment ${investment._id} - transaction already exists`);
+      this.logger.log(`Skipping duplicate ROI transaction for investment ${investment._id} - transaction already exists within last 5 minutes`);
       return existingTransaction;
+    }
+
+    // Additional check: Look for any ROI transaction for this investment in the last minute
+    const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
+    const recentTransaction = await this.transactionModel.findOne({
+      userId: investment.userId,
+      investmentId: investment._id,
+      type: 'roi',
+      status: TransactionStatus.SUCCESS,
+      createdAt: { $gte: oneMinuteAgo }
+    });
+
+    if (recentTransaction) {
+      this.logger.log(`Skipping ROI transaction for investment ${investment._id} - recent transaction exists within last minute`);
+      return recentTransaction;
     }
 
     const transaction = new this.transactionModel({
