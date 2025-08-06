@@ -74,4 +74,10 @@ export class WalletController {
   findByUser(@Param('userId') userId: string) {
     return this.walletService.findByUserId(userId);
   }
+
+  @Get('user/:userId/bonuses')
+  @ApiOperation({ summary: 'Get detailed bonus information for a user' })
+  getBonusDetails(@Param('userId') userId: string) {
+    return this.walletService.getBonusDetails(userId);
+  }
 } 

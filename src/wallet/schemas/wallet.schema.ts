@@ -63,6 +63,22 @@ export class Wallet {
   @Prop({ default: 0, min: 0 })
   lockedUsdtBonuses: number;
 
+  @ApiProperty({ description: 'Locked naira welcome bonuses (not yet available for withdrawal)' })
+  @Prop({ default: 0, min: 0 })
+  lockedNairaWelcomeBonuses: number;
+
+  @ApiProperty({ description: 'Locked USDT welcome bonuses (not yet available for withdrawal)' })
+  @Prop({ default: 0, min: 0 })
+  lockedUsdtWelcomeBonuses: number;
+
+  @ApiProperty({ description: 'Locked naira referral bonuses (not yet available for withdrawal)' })
+  @Prop({ default: 0, min: 0 })
+  lockedNairaReferralBonuses: number;
+
+  @ApiProperty({ description: 'Locked USDT referral bonuses (not yet available for withdrawal)' })
+  @Prop({ default: 0, min: 0 })
+  lockedUsdtReferralBonuses: number;
+
   @ApiProperty({ description: 'Last transaction date' })
   @Prop({ default: null })
   lastTransactionDate?: Date;

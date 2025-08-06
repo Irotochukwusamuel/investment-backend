@@ -160,11 +160,27 @@ export class WalletService {
       });
     }
 
-    // Add bonus to locked balance instead of available balance
+    // Determine bonus type based on description
+    const isWelcomeBonus = description?.toLowerCase().includes('welcome');
+    const isReferralBonus = description?.toLowerCase().includes('referral');
+
+    // Add bonus to appropriate locked balance
     if (currency === 'naira') {
-      wallet.lockedNairaBonuses += amount;
+      wallet.lockedNairaBonuses += amount; // Keep total for backward compatibility
+      
+      if (isWelcomeBonus) {
+        wallet.lockedNairaWelcomeBonuses += amount;
+      } else if (isReferralBonus) {
+        wallet.lockedNairaReferralBonuses += amount;
+      }
     } else {
-      wallet.lockedUsdtBonuses += amount;
+      wallet.lockedUsdtBonuses += amount; // Keep total for backward compatibility
+      
+      if (isWelcomeBonus) {
+        wallet.lockedUsdtWelcomeBonuses += amount;
+      } else if (isReferralBonus) {
+        wallet.lockedUsdtReferralBonuses += amount;
+      }
     }
     
     // Track bonus in total bonuses
@@ -186,12 +202,32 @@ export class WalletService {
       }
       wallet.lockedNairaBonuses -= amount;
       wallet.nairaBalance += amount;
+      
+      // Also reduce the specific bonus types proportionally
+      const totalLocked = wallet.lockedNairaWelcomeBonuses + wallet.lockedNairaReferralBonuses;
+      if (totalLocked > 0) {
+        const welcomeRatio = wallet.lockedNairaWelcomeBonuses / totalLocked;
+        const referralRatio = wallet.lockedNairaReferralBonuses / totalLocked;
+        
+        wallet.lockedNairaWelcomeBonuses -= amount * welcomeRatio;
+        wallet.lockedNairaReferralBonuses -= amount * referralRatio;
+      }
     } else {
       if (wallet.lockedUsdtBonuses < amount) {
         throw new BadRequestException('Insufficient locked USDT bonuses');
       }
       wallet.lockedUsdtBonuses -= amount;
       wallet.usdtBalance += amount;
+      
+      // Also reduce the specific bonus types proportionally
+      const totalLocked = wallet.lockedUsdtWelcomeBonuses + wallet.lockedUsdtReferralBonuses;
+      if (totalLocked > 0) {
+        const welcomeRatio = wallet.lockedUsdtWelcomeBonuses / totalLocked;
+        const referralRatio = wallet.lockedUsdtReferralBonuses / totalLocked;
+        
+        wallet.lockedUsdtWelcomeBonuses -= amount * welcomeRatio;
+        wallet.lockedUsdtReferralBonuses -= amount * referralRatio;
+      }
     }
 
     wallet.lastTransactionDate = new Date();
@@ -274,6 +310,40 @@ export class WalletService {
       totalEarnings: 0,
       totalBonuses: 0,
       totalReferralEarnings: 0,
+    };
+  }
+
+  async getBonusDetails(userId: string): Promise<any> {
+    const wallet = await this.findByUserAndType(userId, WalletType.MAIN);
+    
+    if (!wallet) {
+      return {
+        lockedWelcomeBonuses: { naira: 0, usdt: 0 },
+        lockedReferralBonuses: { naira: 0, usdt: 0 },
+        totalLockedBonuses: { naira: 0, usdt: 0 },
+        availableBalance: { naira: 0, usdt: 0 },
+        totalReferralEarnings: 0,
+      };
+    }
+
+    return {
+      lockedWelcomeBonuses: {
+        naira: wallet.lockedNairaWelcomeBonuses || 0,
+        usdt: wallet.lockedUsdtWelcomeBonuses || 0,
+      },
+      lockedReferralBonuses: {
+        naira: wallet.lockedNairaReferralBonuses || 0,
+        usdt: wallet.lockedUsdtReferralBonuses || 0,
+      },
+      totalLockedBonuses: {
+        naira: wallet.lockedNairaBonuses || 0,
+        usdt: wallet.lockedUsdtBonuses || 0,
+      },
+      availableBalance: {
+        naira: wallet.nairaBalance || 0,
+        usdt: wallet.usdtBalance || 0,
+      },
+      totalReferralEarnings: wallet.totalReferralEarnings || 0,
     };
   }
 

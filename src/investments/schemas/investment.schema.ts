@@ -57,9 +57,13 @@ export class Investment {
   @Prop({ required: true })
   endDate: Date;
 
-  @ApiProperty({ description: 'Current earned amount' })
+  @ApiProperty({ description: 'Total amount earned from this investment' })
   @Prop({ default: 0, min: 0 })
   earnedAmount: number;
+
+  @ApiProperty({ description: 'Total accumulated ROI (never resets, includes withdrawn amounts)' })
+  @Prop({ default: 0, min: 0 })
+  totalAccumulatedRoi: number;
 
   @ApiProperty({ description: 'Total expected return' })
   @Prop({ required: true, min: 0 })

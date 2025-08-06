@@ -76,6 +76,11 @@ export class TasksService implements OnModuleInit {
         status: InvestmentStatus.ACTIVE,
         endDate: { $gt: new Date() },
         nextRoiUpdate: { $lte: new Date() },
+        // Prevent processing investments that were updated in the last 5 minutes
+        $or: [
+          { lastRoiUpdate: { $exists: false } },
+          { lastRoiUpdate: { $lt: new Date(Date.now() - 5 * 60 * 1000) } }
+        ]
       }).populate('userId', 'email firstName lastName').populate('planId', 'name');
 
       this.logger.log(`📊 Found ${activeInvestments.length} active investments that need ROI updates`);
@@ -92,6 +97,7 @@ export class TasksService implements OnModuleInit {
           // Update investment ROI
           const oldEarnedAmount = investment.earnedAmount;
           investment.earnedAmount += hourlyRoiAmount;
+          investment.totalAccumulatedRoi += hourlyRoiAmount; // Track total accumulated ROI
           investment.lastRoiUpdate = new Date();
           
           // Set next ROI update to next hour
@@ -311,6 +317,23 @@ export class TasksService implements OnModuleInit {
   }
 
   private async createRoiTransaction(investment: InvestmentDocument, amount: number, type: 'daily' | 'completion' | 'hourly'): Promise<TransactionDocument> {
+    // Check if a similar transaction already exists for this investment within the last hour
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const existingTransaction = await this.transactionModel.findOne({
+      userId: investment.userId,
+      investmentId: investment._id,
+      type: 'roi',
+      status: TransactionStatus.SUCCESS,
+      createdAt: { $gte: oneHourAgo },
+      amount: amount,
+      currency: investment.currency
+    });
+
+    if (existingTransaction) {
+      this.logger.log(`Skipping duplicate ROI transaction for investment ${investment._id} - transaction already exists`);
+      return existingTransaction;
+    }
+
     const transaction = new this.transactionModel({
       userId: investment.userId,
       type: 'roi',

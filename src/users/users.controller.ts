@@ -183,23 +183,12 @@ export class UsersController {
       const settings = await this.settingsService.getBonusWithdrawalPeriod();
       const bonusPeriodMs = settings.bonusWithdrawalPeriodMs;
       
-      // Determine which date to use for countdown calculation
+      // Use first bonus received date for countdown calculation
       let startDate: Date;
       let timeElapsed: number;
       
-      if (user.lastBonusWithdrawalDate) {
-        // User has withdrawn before, check if they have new bonuses
-        if (user.lastBonusReceivedAt && user.lastBonusReceivedAt > user.lastBonusWithdrawalDate) {
-          // User has received new bonuses after last withdrawal, use new bonus date
-          startDate = user.lastBonusReceivedAt;
-          timeElapsed = now.getTime() - user.lastBonusReceivedAt.getTime();
-        } else {
-          // No new bonuses, use last withdrawal date
-          startDate = user.lastBonusWithdrawalDate;
-          timeElapsed = now.getTime() - user.lastBonusWithdrawalDate.getTime();
-        }
-      } else if (user.firstBonusReceivedAt) {
-        // User has never withdrawn, use first bonus received date
+      if (user.firstBonusReceivedAt) {
+        // User has received bonuses, use first bonus received date
         startDate = user.firstBonusReceivedAt;
         timeElapsed = now.getTime() - user.firstBonusReceivedAt.getTime();
       } else {

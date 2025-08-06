@@ -544,7 +544,7 @@ export class InvestmentsService {
           _id: null,
           totalInvestments: { $sum: 1 },
           totalAmount: { $sum: '$amount' },
-          totalEarnings: { $sum: '$earnedAmount' },
+          totalEarnings: { $sum: '$totalAccumulatedRoi' }, // Use totalAccumulatedRoi instead of earnedAmount
           totalExpectedReturn: { $sum: '$expectedReturn' },
           averageRoi: { $avg: '$dailyRoi' },
           activeInvestments: {
@@ -791,6 +791,7 @@ export class InvestmentsService {
               earnedAmount: 0,
               lastRoiUpdate: new Date()
             }
+            // Note: totalAccumulatedRoi is NOT reset - it keeps the full accumulated amount
           }
         );
       }

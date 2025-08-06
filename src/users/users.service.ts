@@ -120,51 +120,12 @@ export class UsersService {
       };
     }
 
-    // Check if user has already withdrawn bonus before
-    if (user.lastBonusWithdrawalDate) {
-      // User has withdrawn before, check if they have new bonuses since last withdrawal
-      const timeSinceLastWithdrawal = now.getTime() - user.lastBonusWithdrawalDate.getTime();
+    // If user has active investments and has completed the initial bonus period, they can withdraw
+    if (activeInvestments > 0) {
+      const timeSinceFirstBonus = now.getTime() - user.firstBonusReceivedAt.getTime();
       
-      // If user has received new bonuses after last withdrawal, use the new bonus date
-      if (user.lastBonusReceivedAt && user.lastBonusReceivedAt > user.lastBonusWithdrawalDate) {
-        const timeSinceNewBonus = now.getTime() - user.lastBonusReceivedAt.getTime();
-        
-        // If it's been less than the required period since new bonus received, they need to wait
-        if (timeSinceNewBonus < BONUS_WAIT_MS) {
-          const remainingMs = BONUS_WAIT_MS - timeSinceNewBonus;
-          const nextWithdrawalDate = new Date(user.lastBonusReceivedAt.getTime() + BONUS_WAIT_MS);
-          
-          // Calculate remaining time in the appropriate unit
-          let timeLeft: string;
-          let daysLeft: number;
-          
-          if (BONUS_WAIT_UNIT === 'minutes') {
-            daysLeft = Math.max(0, Math.floor(remainingMs / (60 * 1000)));
-            timeLeft = `${daysLeft} minutes`;
-          } else if (BONUS_WAIT_UNIT === 'hours') {
-            daysLeft = Math.max(0, Math.floor(remainingMs / (60 * 60 * 1000)));
-            timeLeft = `${daysLeft} hours`;
-          } else {
-            // For days, show more detailed format
-            daysLeft = Math.max(0, Math.floor(remainingMs / (24 * 60 * 60 * 1000)));
-            if (daysLeft > 0) {
-              timeLeft = `${daysLeft} days`;
-            } else {
-              // If less than a day, show hours
-              const hoursLeft = Math.max(0, Math.floor(remainingMs / (60 * 60 * 1000)));
-              timeLeft = `${hoursLeft} hours`;
-            }
-          }
-          
-          return { 
-            canWithdraw: false, 
-            daysLeft,
-            nextWithdrawalDate,
-            timeLeft
-          };
-        }
-        
-        // If enough time has passed since new bonus, they can withdraw again
+      // If user has completed the initial bonus period, they can withdraw as long as they have active investments
+      if (timeSinceFirstBonus >= BONUS_WAIT_MS) {
         return { 
           canWithdraw: true, 
           daysLeft: 0,
@@ -172,54 +133,7 @@ export class UsersService {
         };
       }
       
-      // If it's been less than the required period since last withdrawal, they need to wait
-      if (timeSinceLastWithdrawal < BONUS_WAIT_MS) {
-        const remainingMs = BONUS_WAIT_MS - timeSinceLastWithdrawal;
-        const nextWithdrawalDate = new Date(user.lastBonusWithdrawalDate.getTime() + BONUS_WAIT_MS);
-        
-        // Calculate remaining time in the appropriate unit
-        let timeLeft: string;
-        let daysLeft: number;
-        
-        if (BONUS_WAIT_UNIT === 'minutes') {
-          daysLeft = Math.max(0, Math.floor(remainingMs / (60 * 1000)));
-          timeLeft = `${daysLeft} minutes`;
-        } else if (BONUS_WAIT_UNIT === 'hours') {
-          daysLeft = Math.max(0, Math.floor(remainingMs / (60 * 60 * 1000)));
-          timeLeft = `${daysLeft} hours`;
-        } else {
-          // For days, show more detailed format
-          daysLeft = Math.max(0, Math.floor(remainingMs / (24 * 60 * 60 * 1000)));
-          if (daysLeft > 0) {
-            timeLeft = `${daysLeft} days`;
-          } else {
-            // If less than a day, show hours
-            const hoursLeft = Math.max(0, Math.floor(remainingMs / (60 * 60 * 1000)));
-            timeLeft = `${hoursLeft} hours`;
-          }
-        }
-        
-        return { 
-          canWithdraw: false, 
-          daysLeft,
-          nextWithdrawalDate,
-          timeLeft
-        };
-      }
-      
-      // If enough time has passed since last withdrawal, they can withdraw again
-      return { 
-        canWithdraw: true, 
-        daysLeft: 0,
-        timeLeft: '0'
-      };
-    }
-
-    // User has never withdrawn bonus before, check if they have completed the initial period
-    const timeSinceFirstBonus = now.getTime() - user.firstBonusReceivedAt.getTime();
-    
-    // If user hasn't completed the required period since first bonus received, they need to wait
-    if (timeSinceFirstBonus < BONUS_WAIT_MS) {
+      // If user hasn't completed the initial bonus period yet, they need to wait
       const remainingMs = BONUS_WAIT_MS - timeSinceFirstBonus;
       const nextWithdrawalDate = new Date(user.firstBonusReceivedAt.getTime() + BONUS_WAIT_MS);
       
@@ -253,11 +167,12 @@ export class UsersService {
       };
     }
 
-    // User can withdraw bonus
+    // If user has no active investments, they can't withdraw bonuses
     return { 
-      canWithdraw: true, 
-      daysLeft: 0,
-      timeLeft: '0'
+      canWithdraw: false, 
+      daysLeft: BONUS_WAIT_VALUE,
+      timeLeft: `${BONUS_WAIT_VALUE} ${BONUS_WAIT_UNIT}`,
+      nextWithdrawalDate: new Date(now.getTime() + BONUS_WAIT_MS)
     };
   }
 
@@ -311,14 +226,10 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    // If user has already withdrawn bonuses before, update the last bonus received date
-    // This will reset the countdown for new bonuses
-    if (user.lastBonusWithdrawalDate) {
-      await this.userModel.findByIdAndUpdate(userId, {
-        lastBonusReceivedAt: new Date(), // Track when new bonus was received
-      });
-    } else if (!user.hasReceivedAnyBonus) {
-      // First time receiving any bonus
+    // Only set firstBonusReceivedAt if it hasn't been set yet
+    // Don't reset the countdown timer for new bonuses since the new logic
+    // maintains active status as long as there are active investments
+    if (!user.hasReceivedAnyBonus) {
       await this.userModel.findByIdAndUpdate(userId, {
         hasReceivedAnyBonus: true,
         firstBonusReceivedAt: new Date(),
