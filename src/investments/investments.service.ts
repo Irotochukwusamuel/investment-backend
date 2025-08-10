@@ -94,10 +94,8 @@ export class InvestmentsService {
     // Calculate expected return
     const expectedReturn = (createInvestmentRequestDto.amount * plan.totalRoi) / 100;
 
-    // Set next ROI update to next hour
-    const nextRoiUpdate = new Date();
-    nextRoiUpdate.setHours(nextRoiUpdate.getHours() + 1);
-    nextRoiUpdate.setMinutes(0, 0, 0); // Set to the top of the hour
+    // Set next ROI update to one hour from now (independent per investment)
+    const nextRoiUpdate = new Date(Date.now() + 60 * 60 * 1000);
 
     // Get user data for notifications and emails
     const user = await this.usersService.findById(userId);

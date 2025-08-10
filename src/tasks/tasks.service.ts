@@ -131,9 +131,9 @@ export class TasksService implements OnModuleInit {
           investment.totalAccumulatedRoi += hourlyRoiAmount; // Track total accumulated ROI
           investment.lastRoiUpdate = new Date();
           
-          // Set next ROI update to next hour
-          const nextRoiUpdate = new Date();
-          nextRoiUpdate.setHours(nextRoiUpdate.getHours() + 1);
+          // Set next ROI update to next hour relative to current schedule (keeps independence)
+          const nextRoiUpdate = new Date(investment.nextRoiUpdate || new Date());
+          nextRoiUpdate.setTime(nextRoiUpdate.getTime() + 60 * 60 * 1000);
           investment.nextRoiUpdate = nextRoiUpdate;
           
           this.logger.log(`✅ Updated earned amount from ${oldEarnedAmount} to ${investment.earnedAmount}`);
