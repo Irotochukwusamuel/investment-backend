@@ -1595,24 +1595,34 @@ export class AdminService {
       // Get old settings for comparison
       const oldSettings = await this.getSettings();
       
+      // Get current platform settings to preserve existing fields
+      const currentDoc = await this.settingsModel.findOne({ key: 'platform' });
+      const currentValue = currentDoc?.value || {};
+      
+      // Merge new settings with existing settings to preserve fields like withdrawalPolicy
+      const mergedSettings = {
+        ...currentValue, // Preserve all existing fields including withdrawalPolicy
+        ...settingsData  // Override with new settings
+      };
+      
       // Update settings in database
       await this.settingsModel.updateOne(
         { key: 'platform' },
-        { value: settingsData },
+        { value: mergedSettings },
         { upsert: true }
       );
       
       // Handle specific setting changes that affect all users
-      await this.handleSettingsChanges(oldSettings, settingsData);
+      await this.handleSettingsChanges(oldSettings, mergedSettings);
       
       // Log the settings update
       console.log('Platform settings updated:', {
         oldSettings: oldSettings,
-        newSettings: settingsData,
+        newSettings: mergedSettings,
         timestamp: new Date().toISOString()
       });
       
-      return settingsData;
+      return mergedSettings;
     } catch (error) {
       console.error('Error updating platform settings:', error);
       throw new BadRequestException(`Failed to update settings: ${error.message}`);
@@ -2088,17 +2098,20 @@ export class AdminService {
     
     let value = doc?.value || {};
     
-    // Update only the withdrawal-related settings
-    value.withdrawalLimits = {
-      minAmount: settingsData.minWithdrawalAmount || value.withdrawalLimits?.minAmount || 1000,
-      maxAmount: settingsData.maxWithdrawalAmount || value.withdrawalLimits?.maxAmount || 1000000,
+    // Preserve existing fields and only update withdrawal-related settings
+    value = {
+      ...value, // Preserve all existing fields including withdrawalPolicy
+      withdrawalLimits: {
+        minAmount: settingsData.minWithdrawalAmount || value.withdrawalLimits?.minAmount || 1000,
+        maxAmount: settingsData.maxWithdrawalAmount || value.withdrawalLimits?.maxAmount || 1000000,
+      },
+      fees: {
+        ...value.fees, // Preserve existing fees
+        withdrawalFee: settingsData.withdrawalFee || value.fees?.withdrawalFee || 2.5,
+      },
+      autoPayout: settingsData.autoPayout !== undefined ? settingsData.autoPayout : value.autoPayout,
+      processingTime: settingsData.processingTime || value.processingTime || 24,
     };
-    value.fees = {
-      ...value.fees,
-      withdrawalFee: settingsData.withdrawalFee || value.fees?.withdrawalFee || 2.5,
-    };
-    value.autoPayout = settingsData.autoPayout !== undefined ? settingsData.autoPayout : value.autoPayout;
-    value.processingTime = settingsData.processingTime || value.processingTime || 24;
     
     console.log('🔧 updateWithdrawalSettings - Updated value:', value);
     
