@@ -38,15 +38,16 @@ export class WithdrawalsService {
 
     // Fetch withdrawal settings
     const settings = await this.adminService.getWithdrawalSettings();
-    if (amount < settings.minWithdrawalAmount || amount > settings.maxWithdrawalAmount) {
-      throw new BadRequestException(
-        `Withdrawal amount must be between ₦${settings.minWithdrawalAmount} and ₦${settings.maxWithdrawalAmount}`
-      );
+    const min = settings.minWithdrawalAmount;
+    const max = settings.maxWithdrawalAmount;
+    if (amount < min || amount > max) {
+      const sign = currency === 'naira' ? '₦' : '$';
+      throw new BadRequestException(`Withdrawal amount must be between ${sign}${min} and ${sign}${max}`);
     }
 
     // Check withdrawal policy (ROI only toggle)
     const withdrawalPolicy = await this.adminService.getWithdrawalPolicy();
-    const enforceRoiOnly = withdrawalPolicy?.roiOnly !== false;
+    const enforceRoiOnly = withdrawalPolicy?.roiOnly === true;
 
     if (enforceRoiOnly) {
       // Check if user has active investments

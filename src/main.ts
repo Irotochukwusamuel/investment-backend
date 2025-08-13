@@ -29,7 +29,10 @@ async function bootstrap() {
 
   // CORS configuration
   app.enableCors({
-    origin: configService.get('FRONTEND_URL') || 'http://localhost:3000',
+    origin: [
+      configService.get('FRONTEND_URL') || 'http://localhost:3000',
+      'https://kltmines.com',
+    ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],

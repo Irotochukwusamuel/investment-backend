@@ -4,7 +4,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class CreateWithdrawalDto {
   @ApiProperty({ description: 'Withdrawal amount' })
   @IsNumber()
-  @Min(100, { message: 'Minimum withdrawal amount is 100' })
+  @Min(1, { message: 'Withdrawal amount must be at least 1' })
   amount: number;
 
   @ApiProperty({ description: 'Currency', enum: ['naira', 'usdt'] })
