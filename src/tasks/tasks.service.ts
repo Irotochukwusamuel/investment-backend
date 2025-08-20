@@ -326,23 +326,59 @@ export class TasksService implements OnModuleInit {
       this.logger.log(`📊 Found ${activeInvestments.length} active investments to reset daily earnings`);
 
       let resetCount = 0;
+      let autoCreditedCount = 0;
       for (const investment of activeInvestments) {
         try {
-          // Reset earnedAmount to 0 for new day
+          // Auto-credit unwithdrawn daily ROI to user's wallet before reset
+          const now = new Date();
+          const lastUpdate = investment.lastRoiUpdate || investment.startDate;
+          const isSameDay = now.getDate() === lastUpdate.getDate() &&
+                            now.getMonth() === lastUpdate.getMonth() &&
+                            now.getFullYear() === lastUpdate.getFullYear();
+
+          const amountToCredit = investment.earnedAmount || 0;
+
+          if (!isSameDay && amountToCredit > 0) {
+            const userIdString = investment.userId.toString();
+
+            // Credit to available balance
+            await this.walletService.deposit(userIdString, {
+              walletType: WalletType.MAIN,
+              amount: amountToCredit,
+              currency: investment.currency,
+              description: 'Daily ROI auto-withdrawal',
+            });
+
+            // Record transaction
+            await this.transactionsService.create({
+              userId: userIdString,
+              type: TransactionType.ROI,
+              amount: amountToCredit,
+              currency: investment.currency,
+              description: 'Daily ROI auto-withdrawal',
+              status: TransactionStatus.SUCCESS,
+              investmentId: investment._id.toString(),
+            });
+
+            autoCreditedCount++;
+            this.logger.log(`💸 Auto-credited ₦/$${amountToCredit.toFixed(2)} for investment ${investment._id}`);
+          }
+
+          // Reset earnedAmount to 0 for the new day regardless
           const oldEarnedAmount = investment.earnedAmount;
           investment.earnedAmount = 0;
-          investment.lastRoiUpdate = new Date();
-          
+          investment.lastRoiUpdate = now;
+
           await investment.save();
           resetCount++;
-          
+
           this.logger.log(`✅ Reset daily earnings for investment ${investment._id}: ${oldEarnedAmount} → 0`);
         } catch (error) {
           this.logger.error(`❌ Error resetting daily earnings for investment ${investment._id}:`, error);
         }
       }
       
-      this.logger.log(`🎯 Daily ROI reset completed: ${resetCount}/${activeInvestments.length} investments reset`);
+      this.logger.log(`🎯 Daily ROI reset completed: ${resetCount}/${activeInvestments.length} investments reset, ${autoCreditedCount} auto-credited to wallets`);
     } catch (error) {
       this.logger.error('❌ Error in resetDailyRoiEarnings task:', error);
     }

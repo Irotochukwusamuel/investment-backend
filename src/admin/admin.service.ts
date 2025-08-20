@@ -143,8 +143,54 @@ export class AdminService {
 
     const total = await this.userModel.countDocuments(filter);
 
+    // Enrich each user with financial summaries (total investment amount, earnings, and wallet balance)
+    const userIds = users.map((u) => u._id);
+
+    // Aggregate investments per user
+    const investmentSummaries = await this.investmentModel.aggregate([
+      { $match: { userId: { $in: userIds } } },
+      {
+        $group: {
+          _id: '$userId',
+          totalInvestmentAmount: { $sum: '$amount' },
+          totalInvestmentCount: { $sum: 1 },
+          totalEarnings: { $sum: { $ifNull: ['$totalAccumulatedRoi', 0] } },
+        },
+      },
+    ]);
+
+    const userIdToInvestment = new Map<string, { totalInvestmentAmount: number; totalInvestmentCount: number; totalEarnings: number }>();
+    for (const item of investmentSummaries) {
+      userIdToInvestment.set(String(item._id), {
+        totalInvestmentAmount: item.totalInvestmentAmount || 0,
+        totalInvestmentCount: item.totalInvestmentCount || 0,
+        totalEarnings: item.totalEarnings || 0,
+      });
+    }
+
+    // Fetch main wallet balances per user
+    const wallets = await this.walletModel
+      .find({ userId: { $in: userIds }, type: WalletType.MAIN })
+      .select('userId nairaBalance');
+    const userIdToWalletBalance = new Map<string, number>();
+    for (const w of wallets) {
+      userIdToWalletBalance.set(String(w.userId), w.nairaBalance || 0);
+    }
+
+    const enrichedUsers = users.map((u) => {
+      const inv = userIdToInvestment.get(String(u._id));
+      const walletBalance = userIdToWalletBalance.get(String(u._id)) || 0;
+      return {
+        ...u.toObject(),
+        totalInvestmentAmount: inv?.totalInvestmentAmount || 0,
+        totalInvestmentCount: inv?.totalInvestmentCount || 0,
+        totalEarnings: inv?.totalEarnings || 0,
+        walletBalance,
+      };
+    });
+
     return {
-      users,
+      users: enrichedUsers,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -378,6 +424,7 @@ export class AdminService {
           dailyRoi: 1,
           totalRoi: 1,
           earnedAmount: 1,
+          totalAccumulatedRoi: 1,
           createdAt: 1,
           updatedAt: 1,
           user: {
@@ -494,7 +541,7 @@ export class AdminService {
           }
         },
         {
-          $group: { _id: null, total: { $sum: '$earnedAmount' } }
+          $group: { _id: null, total: { $sum: { $ifNull: ['$totalAccumulatedRoi', 0] } } }
         }
       ]),
       this.investmentModel.aggregate([
@@ -947,6 +994,28 @@ export class AdminService {
           ...filter
         }
       },
+      // Compute completed withdrawals per user to ensure accurate totals
+      {
+        $lookup: {
+          from: 'withdrawals',
+          let: { uid: '$user._id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$userId', '$$uid'] },
+                    { $eq: ['$status', 'completed'] }
+                  ]
+                }
+              }
+            },
+            { $group: { _id: null, total: { $sum: '$amount' } } }
+          ],
+          as: 'completedWithdrawals'
+        }
+      },
+      { $unwind: { path: '$completedWithdrawals', preserveNullAndEmptyArrays: true } },
       {
         $sort: { createdAt: -1 }
       },
@@ -964,7 +1033,8 @@ export class AdminService {
           nairaBalance: 1,
           usdtBalance: 1,
           totalDeposits: 1,
-          totalWithdrawals: 1,
+          // Prefer computed completed withdrawals total; fallback to stored totalWithdrawals
+          totalWithdrawals: { $ifNull: ['$completedWithdrawals.total', '$totalWithdrawals'] },
           totalInvestments: 1,
           totalEarnings: 1,
           totalBonuses: 1,
@@ -2272,7 +2342,7 @@ export class AdminService {
       user.isPhoneVerified = true;
     }
 
-    await user.save();
+    await user.save()
     return user;
   }
 
