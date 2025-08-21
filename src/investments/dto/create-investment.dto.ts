@@ -44,6 +44,14 @@ export class CreateInvestmentDto {
   @IsNotEmpty()
   endDate: Date;
 
+  @ApiProperty({ description: 'Investment activation date (when investment became active)' })
+  @IsNotEmpty()
+  activatedAt: Date;
+
+  @ApiProperty({ description: 'Next 24-hour ROI cycle date' })
+  @IsNotEmpty()
+  nextRoiCycleDate: Date;
+
   @ApiProperty({ description: 'Total expected return' })
   @IsNumber()
   @Min(0)

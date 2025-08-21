@@ -125,6 +125,8 @@ export class InvestmentsService {
       autoReinvest: createInvestmentRequestDto.autoReinvest || false,
       welcomeBonus,
       referralBonus,
+      activatedAt: new Date(),
+      nextRoiCycleDate: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours from now
     };
 
     // Create the investment
@@ -311,11 +313,17 @@ export class InvestmentsService {
   }
 
   async create(createInvestmentDto: CreateInvestmentDto, userId: string): Promise<Investment> {
+    const now = new Date();
+    const activatedAt = now;
+    const nextRoiCycleDate = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
+    
     const investment = new this.investmentModel({
       ...createInvestmentDto,
       userId: new Types.ObjectId(userId),
       planId: new Types.ObjectId(createInvestmentDto.planId),
       transactionId: createInvestmentDto.transactionId ? new Types.ObjectId(createInvestmentDto.transactionId) : undefined,
+      activatedAt,
+      nextRoiCycleDate,
     });
 
     return investment.save();
@@ -780,14 +788,19 @@ export class InvestmentsService {
     await wallet.save();
 
     // Reset earnedAmount to 0 for all active investments after withdrawal
+    // Also reset the 24-hour cycle for each investment
     for (const investment of activeInvestments) {
       if (investment.earnedAmount > 0) {
+        const now = new Date();
+        const nextRoiCycleDate = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
+        
         await this.investmentModel.findByIdAndUpdate(
           investment._id,
           { 
             $set: { 
               earnedAmount: 0,
-              lastRoiUpdate: new Date()
+              lastRoiUpdate: now,
+              nextRoiCycleDate: nextRoiCycleDate
             }
             // Note: totalAccumulatedRoi is NOT reset - it keeps the full accumulated amount
           }

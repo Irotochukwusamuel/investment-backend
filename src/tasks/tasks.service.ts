@@ -70,7 +70,7 @@ export class TasksService implements OnModuleInit {
     timeZone: 'Africa/Lagos'
   })
   async updateInvestmentRoi() {
-    this.logger.log('🔄 Starting hourly ROI update task');
+    this.logger.log('🔄 Starting 24-hour ROI cycle check task');
     
     // Use a Set to track investments being processed to prevent concurrent processing
     const processingInvestments = new Set<string>();
@@ -79,7 +79,7 @@ export class TasksService implements OnModuleInit {
       const activeInvestments = await this.investmentModel.find({
         status: InvestmentStatus.ACTIVE,
         endDate: { $gt: new Date() },
-        nextRoiUpdate: { $lte: new Date() },
+        nextRoiCycleDate: { $lte: new Date() }, // Check if 24-hour cycle is due
         // Prevent processing investments that were updated in the last 2 minutes
         $or: [
           { lastRoiUpdate: { $exists: false } },
@@ -87,7 +87,7 @@ export class TasksService implements OnModuleInit {
         ]
       }).populate('userId', 'email firstName lastName').populate('planId', 'name');
 
-      this.logger.log(`📊 Found ${activeInvestments.length} active investments that need ROI updates`);
+      this.logger.log(`📊 Found ${activeInvestments.length} active investments that need 24-hour ROI cycle updates`);
 
       let updatedCount = 0;
       for (const investment of activeInvestments) {
@@ -103,48 +103,57 @@ export class TasksService implements OnModuleInit {
         processingInvestments.add(investmentId);
         
         try {
-          this.logger.log(`💰 Processing investment ${investment._id}: ${investment.amount} ${investment.currency}`);
+          this.logger.log(`💰 Processing 24-hour ROI cycle for investment ${investment._id}: ${investment.amount} ${investment.currency}`);
           
-          // Calculate hourly ROI (daily ROI divided by 24 hours)
+          // Calculate daily ROI amount for this investment
           const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
-          const hourlyRoiAmount = dailyRoiAmount / 24;
           
-          // Check if we need to reset daily earnings (new day)
-          const now = new Date();
-          const lastUpdate = investment.lastRoiUpdate || investment.startDate;
-          const isNewDay = now.getDate() !== lastUpdate.getDate() || 
-                          now.getMonth() !== lastUpdate.getMonth() || 
-                          now.getFullYear() !== lastUpdate.getFullYear();
+          // Get the current accumulated ROI (this is what shows in the green highlighted area)
+          const currentAccumulatedRoi = investment.earnedAmount || 0;
           
-          // Update investment ROI
-          const oldEarnedAmount = investment.earnedAmount;
-          
-          if (isNewDay) {
-            // Reset earnedAmount for new day, but keep totalAccumulatedRoi
-            investment.earnedAmount = hourlyRoiAmount;
-            this.logger.log(`🔄 New day detected - resetting daily earnings for investment ${investment._id}`);
-          } else {
-            // Continue accumulating for the same day
-            investment.earnedAmount += hourlyRoiAmount;
+          // Transfer accumulated ROI to available balance (wallet)
+          if (currentAccumulatedRoi > 0) {
+            const userIdString = investment.userId.toString();
+            
+            if (investment.currency === 'naira') {
+              await this.walletService.deposit(userIdString, {
+                walletType: WalletType.MAIN,
+                amount: currentAccumulatedRoi,
+                currency: 'naira',
+                description: `24-hour ROI cycle payment for investment`,
+              });
+            } else {
+              await this.walletService.deposit(userIdString, {
+                walletType: WalletType.MAIN,
+                amount: currentAccumulatedRoi,
+                currency: 'usdt',
+                description: `24-hour ROI cycle payment for investment`,
+              });
+            }
+            
+            // Create ROI transaction record
+            await this.createRoiTransaction(investment, currentAccumulatedRoi, '24-hour-cycle');
+            
+            this.logger.log(`✅ Transferred ${currentAccumulatedRoi} ${investment.currency} ROI to wallet for investment ${investment._id}`);
           }
           
-          investment.totalAccumulatedRoi += hourlyRoiAmount; // Track total accumulated ROI
+          // Reset earnedAmount to 0 for the start of the next 24-hour cycle
+          investment.earnedAmount = 0;
+          
+          // Update totalAccumulatedRoi (this tracks total ROI earned, never resets)
+          investment.totalAccumulatedRoi += currentAccumulatedRoi;
+          
+          // Update timestamps
           investment.lastRoiUpdate = new Date();
           
-          // Set next ROI update to next hour relative to current schedule (keeps independence)
-          const nextRoiUpdate = new Date(investment.nextRoiUpdate || new Date());
-          nextRoiUpdate.setTime(nextRoiUpdate.getTime() + 60 * 60 * 1000);
-          investment.nextRoiUpdate = nextRoiUpdate;
-          
-          this.logger.log(`✅ Updated earned amount from ${oldEarnedAmount} to ${investment.earnedAmount}`);
+          // Set next ROI cycle to 24 hours from now
+          const nextRoiCycleDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+          investment.nextRoiCycleDate = nextRoiCycleDate;
           
           // Check if investment is completed
           if (new Date() >= investment.endDate) {
             investment.status = InvestmentStatus.COMPLETED;
             this.logger.log(`🎉 Investment ${investment._id} completed!`);
-            
-            // Create completion transaction
-            const completionTransaction = await this.createRoiTransaction(investment, hourlyRoiAmount, 'completion');
             
             // Send completion email
             if (investment.userId && typeof investment.userId === 'object' && 'email' in investment.userId) {
@@ -160,66 +169,19 @@ export class TasksService implements OnModuleInit {
                   planName: planName,
                   currency: investment.currency,
                   initialAmount: investment.amount,
-                  totalRoi: investment.earnedAmount,
+                  totalRoi: investment.totalAccumulatedRoi,
                   completionDate: new Date(),
                   duration: investment.duration,
                   investmentId: investment._id.toString(),
                 }
               );
             }
-          } else {
-            // Send ROI notification email only once per day (at midnight)
-            const currentHour = new Date().getHours();
-            if (currentHour === 0 && investment.userId && typeof investment.userId === 'object' && 'email' in investment.userId) {
-              const user = investment.userId as any;
-              const planName = typeof investment.planId === 'object' && 'name' in investment.planId 
-                ? (investment.planId as any).name 
-                : 'Investment Plan';
-              
-              // Create ROI transaction first to get the transaction ID
-              const roiTransaction = await this.createRoiTransaction(investment, dailyRoiAmount, 'daily');
-              
-              await this.emailService.sendRoiPaymentNotification(
-                user.email,
-                user.firstName,
-                {
-                  currency: investment.currency,
-                  amount: dailyRoiAmount, // Send daily total in email
-                  investmentName: planName,
-                  paymentDate: new Date(),
-                  paymentType: 'Daily ROI',
-                  transactionId: roiTransaction._id.toString(),
-                }
-              );
-            } else {
-              // Create regular hourly ROI transaction
-              await this.createRoiTransaction(investment, hourlyRoiAmount, 'hourly');
-            }
           }
           
           await investment.save();
           updatedCount++;
           
-          // Update user's main wallet with ROI
-          const userIdString = investment.userId.toString();
-          
-          if (investment.currency === 'naira') {
-            await this.walletService.deposit(userIdString, {
-              walletType: WalletType.MAIN,
-              amount: hourlyRoiAmount,
-              currency: 'naira',
-              description: `Hourly ROI payment for investment`,
-            });
-          } else {
-            await this.walletService.deposit(userIdString, {
-              walletType: WalletType.MAIN,
-              amount: hourlyRoiAmount,
-              currency: 'usdt',
-              description: `Hourly ROI payment for investment`,
-            });
-          }
-          
-          this.logger.log(`✅ Successfully updated investment ${investment._id}`);
+          this.logger.log(`✅ Successfully completed 24-hour ROI cycle for investment ${investment._id}`);
           
         } catch (error) {
           this.logger.error(`❌ Error updating ROI for investment ${investment._id}:`, error);
@@ -229,9 +191,56 @@ export class TasksService implements OnModuleInit {
         }
       }
       
-      this.logger.log(`🎯 ROI update completed: ${updatedCount}/${activeInvestments.length} investments updated`);
+      this.logger.log(`🎯 24-hour ROI cycle update completed: ${updatedCount}/${activeInvestments.length} investments updated`);
     } catch (error) {
       this.logger.error('❌ Error in updateInvestmentRoi task:', error);
+    }
+  }
+
+  // New cron job to accumulate ROI during the 24-hour cycle
+  @Cron(CronExpression.EVERY_HOUR, {
+    name: 'accumulateRoiDuringCycle',
+    timeZone: 'Africa/Lagos'
+  })
+  async accumulateRoiDuringCycle() {
+    this.logger.log('🔄 Starting hourly ROI accumulation task');
+    
+    try {
+      const activeInvestments = await this.investmentModel.find({
+        status: InvestmentStatus.ACTIVE,
+        endDate: { $gt: new Date() },
+        // Only accumulate ROI for investments that haven't reached their 24-hour cycle yet
+        nextRoiCycleDate: { $gt: new Date() }
+      }).populate('planId', 'dailyRoi');
+
+      this.logger.log(`📊 Found ${activeInvestments.length} active investments accumulating ROI`);
+
+      let updatedCount = 0;
+      for (const investment of activeInvestments) {
+        try {
+          // Calculate hourly ROI (daily ROI divided by 24 hours)
+          const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
+          const hourlyRoiAmount = dailyRoiAmount / 24;
+          
+          // Add hourly ROI to earnedAmount (this is what shows in the green highlighted area)
+          investment.earnedAmount = (investment.earnedAmount || 0) + hourlyRoiAmount;
+          
+          // Update lastRoiUpdate timestamp
+          investment.lastRoiUpdate = new Date();
+          
+          await investment.save();
+          updatedCount++;
+          
+          this.logger.log(`💰 Accumulated ${hourlyRoiAmount.toFixed(4)} ${investment.currency} ROI for investment ${investment._id} (Total: ${investment.earnedAmount.toFixed(4)})`);
+          
+        } catch (error) {
+          this.logger.error(`❌ Error accumulating ROI for investment ${investment._id}:`, error);
+        }
+      }
+      
+      this.logger.log(`🎯 ROI accumulation completed: ${updatedCount}/${activeInvestments.length} investments updated`);
+    } catch (error) {
+      this.logger.error('❌ Error in accumulateRoiDuringCycle task:', error);
     }
   }
 
@@ -311,79 +320,6 @@ export class TasksService implements OnModuleInit {
     }
   }
 
-  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, {
-    name: 'resetDailyRoiEarnings',
-    timeZone: 'Africa/Lagos'
-  })
-  async resetDailyRoiEarnings() {
-    this.logger.log('🔄 Starting daily ROI earnings reset task');
-    
-    try {
-      const activeInvestments = await this.investmentModel.find({
-        status: InvestmentStatus.ACTIVE
-      });
-
-      this.logger.log(`📊 Found ${activeInvestments.length} active investments to reset daily earnings`);
-
-      let resetCount = 0;
-      let autoCreditedCount = 0;
-      for (const investment of activeInvestments) {
-        try {
-          // Auto-credit unwithdrawn daily ROI to user's wallet before reset
-          const now = new Date();
-          const lastUpdate = investment.lastRoiUpdate || investment.startDate;
-          const isSameDay = now.getDate() === lastUpdate.getDate() &&
-                            now.getMonth() === lastUpdate.getMonth() &&
-                            now.getFullYear() === lastUpdate.getFullYear();
-
-          const amountToCredit = investment.earnedAmount || 0;
-
-          if (!isSameDay && amountToCredit > 0) {
-            const userIdString = investment.userId.toString();
-
-            // Credit to available balance
-            await this.walletService.deposit(userIdString, {
-              walletType: WalletType.MAIN,
-              amount: amountToCredit,
-              currency: investment.currency,
-              description: 'Daily ROI auto-withdrawal',
-            });
-
-            // Record transaction
-            await this.transactionsService.create({
-              userId: userIdString,
-              type: TransactionType.ROI,
-              amount: amountToCredit,
-              currency: investment.currency,
-              description: 'Daily ROI auto-withdrawal',
-              status: TransactionStatus.SUCCESS,
-              investmentId: investment._id.toString(),
-            });
-
-            autoCreditedCount++;
-            this.logger.log(`💸 Auto-credited ₦/$${amountToCredit.toFixed(2)} for investment ${investment._id}`);
-          }
-
-          // Reset earnedAmount to 0 for the new day regardless
-          const oldEarnedAmount = investment.earnedAmount;
-          investment.earnedAmount = 0;
-          investment.lastRoiUpdate = now;
-
-          await investment.save();
-          resetCount++;
-
-          this.logger.log(`✅ Reset daily earnings for investment ${investment._id}: ${oldEarnedAmount} → 0`);
-        } catch (error) {
-          this.logger.error(`❌ Error resetting daily earnings for investment ${investment._id}:`, error);
-        }
-      }
-      
-      this.logger.log(`🎯 Daily ROI reset completed: ${resetCount}/${activeInvestments.length} investments reset, ${autoCreditedCount} auto-credited to wallets`);
-    } catch (error) {
-      this.logger.error('❌ Error in resetDailyRoiEarnings task:', error);
-    }
-  }
-
   @Cron(CronExpression.EVERY_WEEK, {
     name: 'generateWeeklyReports',
     timeZone: 'Africa/Lagos'
@@ -423,7 +359,7 @@ export class TasksService implements OnModuleInit {
     }
   }
 
-  private async createRoiTransaction(investment: InvestmentDocument, amount: number, type: 'daily' | 'completion' | 'hourly'): Promise<TransactionDocument> {
+  private async createRoiTransaction(investment: InvestmentDocument, amount: number, type: 'daily' | 'completion' | 'hourly' | '24-hour-cycle'): Promise<TransactionDocument> {
     // Check if a similar transaction already exists for this investment within the last 5 minutes
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     const existingTransaction = await this.transactionModel.findOne({

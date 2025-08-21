@@ -57,6 +57,14 @@ export class Investment {
   @Prop({ required: true })
   endDate: Date;
 
+  @ApiProperty({ description: 'Investment activation date (when investment became active)' })
+  @Prop({ required: true, default: Date.now })
+  activatedAt: Date;
+
+  @ApiProperty({ description: 'Next 24-hour ROI cycle date' })
+  @Prop({ required: true })
+  nextRoiCycleDate: Date;
+
   @ApiProperty({ description: 'Total amount earned from this investment' })
   @Prop({ default: 0, min: 0 })
   earnedAmount: number;
@@ -118,6 +126,7 @@ export const InvestmentSchema = SchemaFactory.createForClass(Investment);
 InvestmentSchema.index({ userId: 1, status: 1 });
 InvestmentSchema.index({ planId: 1, status: 1 });
 InvestmentSchema.index({ status: 1, nextRoiUpdate: 1 });
+InvestmentSchema.index({ status: 1, nextRoiCycleDate: 1 }); // New index for 24-hour ROI cycles
 InvestmentSchema.index({ startDate: 1, endDate: 1 });
 InvestmentSchema.index({ createdAt: -1 });
 
