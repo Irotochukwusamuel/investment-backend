@@ -65,25 +65,61 @@ export class TasksService implements OnModuleInit {
     await this.updateInvestmentRoi();
   }
 
+  // Manual trigger method for testing hourly accumulation
+  async triggerHourlyRoiAccumulation() {
+    this.logger.log('🔧 Manually triggering hourly ROI accumulation...');
+    // Note: Hourly ROI accumulation is now handled in the main updateInvestmentRoi cron job
+    await this.updateInvestmentRoi();
+  }
+
+  // Manual trigger method for fixing total ROI calculations
+  async triggerTotalRoiRecalculation() {
+    this.logger.log('🔧 Manually triggering total ROI recalculation...');
+    await this.recalculateTotalRoiForAllInvestments();
+  }
+
+  // Manual trigger method for processing pending transactions
+  async triggerPendingTransactionsProcessing() {
+    this.logger.log('🔧 Manually triggering pending transactions processing...');
+    await this.processPendingTransactions();
+  }
+
+  // Manual trigger method for countdown management
+  async triggerCountdownManagement() {
+    this.logger.log('🔧 Manually triggering countdown management...');
+    await this.manageCountdowns();
+  }
+
   @Cron(CronExpression.EVERY_10_SECONDS, {
     name: 'updateInvestmentRoi',
     timeZone: 'Africa/Lagos'
   })
   async updateInvestmentRoi() {
-    this.logger.log('🔄 Starting 24-hour ROI cycle check task');
+    this.logger.log('🔄 Starting ROI update task (24-hour cycles + hourly accumulation)');
     
     // Use a Set to track investments being processed to prevent concurrent processing
     const processingInvestments = new Set<string>();
     
     try {
+      // Find investments that need either 24-hour cycle updates OR hourly ROI accumulation
       const activeInvestments = await this.investmentModel.find({
         status: InvestmentStatus.ACTIVE,
         endDate: { $gt: new Date() },
-        nextRoiCycleDate: { $lte: new Date() }, // Check if 24-hour cycle is due
-        // Prevent processing investments that were updated in the last 2 minutes
-        $or: [
-          { lastRoiUpdate: { $exists: false } },
-          { lastRoiUpdate: { $lt: new Date(Date.now() - 2 * 60 * 1000) } }
+        $and: [
+          // Either 24-hour cycle is due OR hourly ROI accumulation is due
+          {
+            $or: [
+              { nextRoiCycleDate: { $lte: new Date() } },
+              { nextRoiUpdate: { $lte: new Date() } }
+            ]
+          },
+          // AND prevent processing investments that were updated in the last 2 minutes
+          {
+            $or: [
+              { lastRoiUpdate: { $exists: false } },
+              { lastRoiUpdate: { $lt: new Date(Date.now() - 2 * 60 * 1000) } }
+            ]
+          }
         ]
       }).populate('userId', 'email firstName lastName').populate('planId', 'name');
 
@@ -103,52 +139,93 @@ export class TasksService implements OnModuleInit {
         processingInvestments.add(investmentId);
         
         try {
-          this.logger.log(`💰 Processing 24-hour ROI cycle for investment ${investment._id}: ${investment.amount} ${investment.currency}`);
+          const now = new Date();
+          const needs24HourCycle = investment.nextRoiCycleDate && investment.nextRoiCycleDate <= now;
+          const needsHourlyUpdate = investment.nextRoiUpdate && investment.nextRoiUpdate <= now;
+
+          this.logger.log('needs24HourCycle', needs24HourCycle);
+          this.logger.log('needsHourlyUpdate', needsHourlyUpdate);
           
-          // Calculate daily ROI amount for this investment
-          const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
-          
-          // Get the current accumulated ROI (this is what shows in the green highlighted area)
-          const currentAccumulatedRoi = investment.earnedAmount || 0;
-          
-          // Transfer accumulated ROI to available balance (wallet)
-          if (currentAccumulatedRoi > 0) {
-            const userIdString = investment.userId.toString();
+          if (needs24HourCycle) {
+            this.logger.log(`💰 Processing 24-hour ROI cycle for investment ${investment._id}: ${investment.amount} ${investment.currency}`);
             
-            if (investment.currency === 'naira') {
-              await this.walletService.deposit(userIdString, {
-                walletType: WalletType.MAIN,
-                amount: currentAccumulatedRoi,
-                currency: 'naira',
-                description: `24-hour ROI cycle payment for investment`,
-              });
-            } else {
-              await this.walletService.deposit(userIdString, {
-                walletType: WalletType.MAIN,
-                amount: currentAccumulatedRoi,
-                currency: 'usdt',
-                description: `24-hour ROI cycle payment for investment`,
-              });
+            // Calculate daily ROI amount for this investment
+            const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
+            
+            // Get the current accumulated ROI (this is what shows in the green highlighted area)
+            const currentAccumulatedRoi = investment.earnedAmount || 0;
+            
+            // Transfer accumulated ROI to available balance (wallet) if there's any to transfer
+            if (currentAccumulatedRoi > 0) {
+              const userIdString = investment.userId.toString();
+              
+              try {
+                if (investment.currency === 'naira') {
+                  await this.walletService.deposit(userIdString, {
+                    walletType: WalletType.MAIN,
+                    amount: currentAccumulatedRoi,
+                    currency: 'naira',
+                    description: `24-hour ROI cycle payment for investment ${investment._id}`,
+                  });
+                } else {
+                  await this.walletService.deposit(userIdString, {
+                    walletType: WalletType.MAIN,
+                    amount: currentAccumulatedRoi,
+                    currency: 'usdt',
+                    description: `24-hour ROI cycle payment for investment ${investment._id}`,
+                  });
+                }
+                
+                // Create ROI transaction record
+                await this.createRoiTransaction(investment, currentAccumulatedRoi, '24-hour-cycle');
+                
+                this.logger.log(`✅ Transferred ${currentAccumulatedRoi} ${investment.currency} ROI to wallet for investment ${investment._id}`);
+              } catch (walletError) {
+                this.logger.error(`❌ Failed to transfer ROI to wallet for investment ${investment._id}:`, walletError);
+                // Continue processing the investment even if wallet transfer fails
+              }
             }
             
-            // Create ROI transaction record
-            await this.createRoiTransaction(investment, currentAccumulatedRoi, '24-hour-cycle');
+            // Update totalAccumulatedRoi (this tracks total ROI earned, never resets)
+            investment.totalAccumulatedRoi = (investment.totalAccumulatedRoi || 0) + currentAccumulatedRoi;
             
-            this.logger.log(`✅ Transferred ${currentAccumulatedRoi} ${investment.currency} ROI to wallet for investment ${investment._id}`);
+            // Reset earnedAmount to 0 for the start of the next 24-hour cycle
+            investment.earnedAmount = 0;
+            
+            // Update timestamps
+            investment.lastRoiUpdate = now;
+            
+            // Set next ROI cycle to 24 hours from now
+            const nextRoiCycleDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            investment.nextRoiCycleDate = nextRoiCycleDate;
+            
+            // Set next hourly update to 1 hour from the last update time
+            const nextRoiUpdate = new Date(investment.lastRoiUpdate.getTime() + 60 * 60 * 1000);
+            investment.nextRoiUpdate = nextRoiUpdate;
+            
+            this.logger.log(`✅ Completed 24-hour ROI cycle for investment ${investment._id}. Total accumulated ROI: ${investment.totalAccumulatedRoi}`);
+            
+          } else if (needsHourlyUpdate) {
+            this.logger.log(`💰 Processing hourly ROI accumulation for investment ${investment._id}: ${investment.amount} ${investment.currency}`);
+            
+            // Calculate hourly ROI
+            const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
+            const hourlyRoiAmount = dailyRoiAmount / 24;
+            
+            // Add hourly ROI to earnedAmount
+            const currentEarnedAmount = investment.earnedAmount || 0;
+            const newEarnedAmount = currentEarnedAmount + hourlyRoiAmount;
+            investment.earnedAmount = Math.round(newEarnedAmount * 10000) / 10000;
+            
+            // Update timestamps
+            investment.lastRoiUpdate = now;
+            
+            // Set next hourly update to 1 hour from the last update time
+            const nextRoiUpdate = new Date(investment.lastRoiUpdate.getTime() + 60 * 60 * 1000);
+            investment.nextRoiUpdate = nextRoiUpdate;
+            
+            this.logger.log(`✅ Accumulated ${hourlyRoiAmount.toFixed(4)} ${investment.currency} ROI for investment ${investment._id}. Total earned: ${investment.earnedAmount.toFixed(4)}`);
           }
-          
-          // Reset earnedAmount to 0 for the start of the next 24-hour cycle
-          investment.earnedAmount = 0;
-          
-          // Update totalAccumulatedRoi (this tracks total ROI earned, never resets)
-          investment.totalAccumulatedRoi += currentAccumulatedRoi;
-          
-          // Update timestamps
-          investment.lastRoiUpdate = new Date();
-          
-          // Set next ROI cycle to 24 hours from now
-          const nextRoiCycleDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
-          investment.nextRoiCycleDate = nextRoiCycleDate;
           
           // Check if investment is completed
           if (new Date() >= investment.endDate) {
@@ -178,10 +255,11 @@ export class TasksService implements OnModuleInit {
             }
           }
           
-          await investment.save();
-          updatedCount++;
-          
-          this.logger.log(`✅ Successfully completed 24-hour ROI cycle for investment ${investment._id}`);
+          // Save the investment if any changes were made
+          if (needs24HourCycle || needsHourlyUpdate) {
+            await investment.save();
+            updatedCount++;
+          }
           
         } catch (error) {
           this.logger.error(`❌ Error updating ROI for investment ${investment._id}:`, error);
@@ -197,50 +275,49 @@ export class TasksService implements OnModuleInit {
     }
   }
 
-  // New cron job to accumulate ROI during the 24-hour cycle
-  @Cron(CronExpression.EVERY_HOUR, {
-    name: 'accumulateRoiDuringCycle',
+  // Note: Hourly ROI accumulation is now handled in the main updateInvestmentRoi cron job
+  // This eliminates the need for a separate hourly cron job and ensures consistency
+
+  // New cron job to manage countdowns and ensure synchronization
+  @Cron(CronExpression.EVERY_5_MINUTES, {
+    name: 'manageCountdowns',
     timeZone: 'Africa/Lagos'
   })
-  async accumulateRoiDuringCycle() {
-    this.logger.log('🔄 Starting hourly ROI accumulation task');
+  async manageCountdowns() {
+    this.logger.log('🔄 Starting countdown management task');
     
     try {
       const activeInvestments = await this.investmentModel.find({
         status: InvestmentStatus.ACTIVE,
-        endDate: { $gt: new Date() },
-        // Only accumulate ROI for investments that haven't reached their 24-hour cycle yet
-        nextRoiCycleDate: { $gt: new Date() }
-      }).populate('planId', 'dailyRoi');
+        endDate: { $gt: new Date() }
+      });
 
-      this.logger.log(`📊 Found ${activeInvestments.length} active investments accumulating ROI`);
+      this.logger.log(`📊 Found ${activeInvestments.length} active investments to check countdowns`);
 
       let updatedCount = 0;
       for (const investment of activeInvestments) {
         try {
-          // Calculate hourly ROI (daily ROI divided by 24 hours)
-          const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
-          const hourlyRoiAmount = dailyRoiAmount / 24;
+          const now = new Date();
+          const nextRoiUpdate = new Date(investment.nextRoiUpdate);
+          const timeUntilNext = nextRoiUpdate.getTime() - now.getTime();
           
-          // Add hourly ROI to earnedAmount (this is what shows in the green highlighted area)
-          investment.earnedAmount = (investment.earnedAmount || 0) + hourlyRoiAmount;
-          
-          // Update lastRoiUpdate timestamp
-          investment.lastRoiUpdate = new Date();
-          
-          await investment.save();
-          updatedCount++;
-          
-          this.logger.log(`💰 Accumulated ${hourlyRoiAmount.toFixed(4)} ${investment.currency} ROI for investment ${investment._id} (Total: ${investment.earnedAmount.toFixed(4)})`);
-          
+          // If nextRoiUpdate is in the past or very close (within 1 minute), update it
+          if (timeUntilNext <= 60 * 1000) {
+            const newNextRoiUpdate = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour from now
+            investment.nextRoiUpdate = newNextRoiUpdate;
+            await investment.save();
+            
+            this.logger.log(`⏰ Updated countdown for investment ${investment._id}: ${nextRoiUpdate.toISOString()} → ${newNextRoiUpdate.toISOString()}`);
+            updatedCount++;
+          }
         } catch (error) {
-          this.logger.error(`❌ Error accumulating ROI for investment ${investment._id}:`, error);
+          this.logger.error(`❌ Error managing countdown for investment ${investment._id}:`, error);
         }
       }
       
-      this.logger.log(`🎯 ROI accumulation completed: ${updatedCount}/${activeInvestments.length} investments updated`);
+      this.logger.log(`🎯 Countdown management completed: ${updatedCount} countdowns updated`);
     } catch (error) {
-      this.logger.error('❌ Error in accumulateRoiDuringCycle task:', error);
+      this.logger.error('❌ Error in manageCountdowns task:', error);
     }
   }
 
@@ -343,6 +420,7 @@ export class TasksService implements OnModuleInit {
             totalInvestments: { $sum: 1 },
             totalAmount: { $sum: '$amount' },
             totalEarnings: { $sum: '$earnedAmount' },
+            totalAccumulatedRoi: { $sum: '$totalAccumulatedRoi' },
             activeInvestments: {
               $sum: { $cond: [{ $eq: ['$status', InvestmentStatus.ACTIVE] }, 1, 0] }
             },
@@ -354,8 +432,56 @@ export class TasksService implements OnModuleInit {
       ]);
       
       this.logger.log('📊 Weekly investment stats:', weeklyStats[0] || {});
+      
+      // Also recalculate total ROI for all investments to ensure consistency
+      await this.recalculateTotalRoiForAllInvestments();
+      
     } catch (error) {
       this.logger.error('❌ Error in generateWeeklyReports task:', error);
+    }
+  }
+
+  // New method to recalculate total ROI for all investments
+  async recalculateTotalRoiForAllInvestments() {
+    this.logger.log('🔄 Starting total ROI recalculation for all investments');
+    
+    try {
+      // Get all investments that need total ROI recalculation
+      const investments = await this.investmentModel.find({
+        status: { $in: [InvestmentStatus.ACTIVE, InvestmentStatus.COMPLETED] }
+      });
+      
+      let updatedCount = 0;
+      for (const investment of investments) {
+        try {
+          // Get all ROI transactions for this investment
+          const roiTransactions = await this.transactionModel.find({
+            investmentId: investment._id,
+            type: 'roi',
+            status: TransactionStatus.SUCCESS
+          });
+          
+          // Calculate total accumulated ROI from transaction history
+          const totalRoiFromTransactions = roiTransactions.reduce((sum, tx) => sum + tx.amount, 0);
+          
+          // Update the investment's totalAccumulatedRoi if it differs
+          if (Math.abs((investment.totalAccumulatedRoi || 0) - totalRoiFromTransactions) > 0.01) {
+            const oldTotal = investment.totalAccumulatedRoi || 0;
+            investment.totalAccumulatedRoi = totalRoiFromTransactions;
+            await investment.save();
+            
+            this.logger.log(`✅ Updated total ROI for investment ${investment._id}: ${oldTotal} → ${totalRoiFromTransactions}`);
+            updatedCount++;
+          }
+          
+        } catch (error) {
+          this.logger.error(`❌ Error recalculating ROI for investment ${investment._id}:`, error);
+        }
+      }
+      
+      this.logger.log(`🎯 Total ROI recalculation completed: ${updatedCount} investments updated`);
+    } catch (error) {
+      this.logger.error('❌ Error in recalculateTotalRoiForAllInvestments:', error);
     }
   }
 

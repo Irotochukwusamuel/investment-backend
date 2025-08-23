@@ -171,6 +171,17 @@ InvestmentSchema.virtual('progressPercentage').get(function() {
   return Math.min(100, Math.max(0, percentage));
 });
 
+// Virtual for progress (alias for progressPercentage to match frontend)
+InvestmentSchema.virtual('progress').get(function() {
+  const now = new Date();
+  const start = new Date(this.startDate);
+  const end = new Date(this.endDate);
+  const totalDuration = end.getTime() - start.getTime();
+  const elapsed = now.getTime() - start.getTime();
+  const percentage = (elapsed / totalDuration) * 100;
+  return Math.min(100, Math.max(0, percentage));
+});
+
 // Virtual for payout history - fetches ROI transactions for this investment
 InvestmentSchema.virtual('payoutHistory', {
   ref: 'Transaction',

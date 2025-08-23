@@ -19,6 +19,7 @@ import { CreateInvestmentRequestDto } from './dto/create-investment-request.dto'
 import { UpdateInvestmentDto } from './dto/update-investment.dto';
 import { Investment } from './schemas/investment.schema';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { GetUser } from '../auth/decorators/get-user.decorator';
 
 @ApiTags('investments')
 @Controller('investments')
@@ -68,12 +69,19 @@ export class InvestmentsController {
   }
 
   @Get('stats')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Get investment statistics' })
-  @ApiResponse({ status: 200, description: 'Investment stats retrieved successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiQuery({ name: 'userId', required: false, description: 'Filter stats by user ID' })
-  async getStats(@Query('userId') userId?: string): Promise<any> {
+  @ApiResponse({ status: 200, description: 'Investment statistics retrieved successfully' })
+  async getInvestmentStats(@GetUser('id') userId: string) {
     return this.investmentsService.getInvestmentStats(userId);
+  }
+
+  @Get('roi-stats')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get detailed ROI statistics for dashboard' })
+  @ApiResponse({ status: 200, description: 'ROI statistics retrieved successfully' })
+  async getDetailedRoiStats(@GetUser('id') userId: string) {
+    return this.investmentsService.getDetailedRoiStats(userId);
   }
 
   @Get('active')

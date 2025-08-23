@@ -619,7 +619,7 @@ export class InvestmentsService {
       {
         $group: {
           _id: '$planId',
-          totalEarnings: { $sum: '$earnedAmount' },
+          totalEarnings: { $sum: '$totalAccumulatedRoi' }, // Use totalAccumulatedRoi for consistent calculation
           totalInvestments: { $sum: 1 }
         }
       },
@@ -647,11 +647,64 @@ export class InvestmentsService {
       completionRate,
       topPerformingPlan: topPerformingPlan[0]?.plan || null,
       recentInvestments,
-      totalInvestments: stats[0]?.totalInvestments || 0,
-      totalExpectedReturn: stats[0]?.totalExpectedReturn || 0,
-      completedInvestments: stats[0]?.completedInvestments || 0,
-      cancelledInvestments: stats[0]?.cancelledInvestments || 0,
     };
+  }
+
+  // New method to get detailed ROI calculations for dashboard
+  async getDetailedRoiStats(userId: string): Promise<any> {
+    try {
+      // Get all investments for the user
+      const investments = await this.investmentModel.find({
+        userId: new Types.ObjectId(userId),
+        status: { $in: [InvestmentStatus.ACTIVE, InvestmentStatus.COMPLETED] }
+      }).populate('planId', 'name dailyRoi totalRoi');
+
+      // Calculate total ROI from all investments
+      const totalAccumulatedRoi = investments.reduce((sum, inv) => sum + (inv.totalAccumulatedRoi || 0), 0);
+      
+      // Calculate current daily earnings (from active investments only)
+      const activeInvestments = investments.filter(inv => inv.status === InvestmentStatus.ACTIVE);
+      const currentDailyEarnings = activeInvestments.reduce((sum, inv) => sum + (inv.earnedAmount || 0), 0);
+      
+      // Calculate total expected return
+      const totalExpectedReturn = investments.reduce((sum, inv) => sum + (inv.expectedReturn || 0), 0);
+      
+      // Get ROI history from transactions
+      const roiTransactions = await this.transactionsService.getTransactionModel().find({
+        userId: new Types.ObjectId(userId),
+        type: 'roi',
+        status: 'completed'
+      }).sort({ createdAt: -1 }).limit(10);
+
+      return {
+        totalAccumulatedRoi,
+        currentDailyEarnings,
+        totalExpectedReturn,
+        activeInvestmentsCount: activeInvestments.length,
+        totalInvestmentsCount: investments.length,
+        roiHistory: roiTransactions,
+        investments: investments.map(inv => ({
+          id: inv._id,
+          planName: typeof inv.planId === 'object' && inv.planId !== null && 'name' in inv.planId 
+            ? (inv.planId as any).name 
+            : 'Unknown Plan',
+          amount: inv.amount,
+          currency: inv.currency,
+          dailyRoi: inv.dailyRoi,
+          totalRoi: inv.totalRoi,
+          earnedAmount: inv.earnedAmount,
+          totalAccumulatedRoi: inv.totalAccumulatedRoi,
+          expectedReturn: inv.expectedReturn,
+          status: inv.status,
+          startDate: inv.startDate,
+          endDate: inv.endDate,
+          lastRoiUpdate: inv.lastRoiUpdate,
+          nextRoiCycleDate: inv.nextRoiCycleDate
+        }))
+      };
+    } catch (error) {
+      throw new Error(`Failed to get detailed ROI stats: ${error.message}`);
+    }
   }
 
   async getInvestmentsByCurrency(currency: string): Promise<Investment[]> {
