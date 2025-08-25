@@ -49,14 +49,14 @@ export class InvestmentsService {
       }
     }
 
-    // Check if user already has 3 active investments (maximum limit)
+    // Check if user already has an active investment (only one allowed at a time)
     const activeInvestments = await this.investmentModel.countDocuments({
       userId: new Types.ObjectId(userId),
       status: InvestmentStatus.ACTIVE
     });
 
-    if (activeInvestments >= 3) {
-      throw new BadRequestException('You can only have a maximum of 3 active investment plans at a time');
+    if (activeInvestments >= 1) {
+      throw new BadRequestException('You can only have one active investment at a time. Please complete or cancel your current investment before starting a new one.');
     }
 
     // Validate amount is within plan limits

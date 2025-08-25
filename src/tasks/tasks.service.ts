@@ -11,6 +11,7 @@ import { EmailService } from '../email/email.service';
 import { WalletType } from '../wallet/schemas/wallet.schema';
 import { TransactionsService } from '../transactions/transactions.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RoiNotificationsService } from '../notifications/roi-notifications.service';
 import { NotificationType, NotificationCategory } from '../notifications/schemas/notification.schema';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
@@ -27,6 +28,7 @@ export class TasksService implements OnModuleInit {
     private readonly configService: ConfigService,
     private readonly transactionsService: TransactionsService,
     private readonly notificationsService: NotificationsService,
+    private readonly roiNotificationsService: RoiNotificationsService,
     private readonly eventEmitter: EventEmitter2,
   ) {
     // Initialize FINTAVA client
@@ -179,49 +181,13 @@ export class TasksService implements OnModuleInit {
                 // Create ROI transaction record
                 await this.createRoiTransaction(investment, currentAccumulatedRoi, '24-hour-cycle');
                 
-                // Send ROI notification to user
+                // Send comprehensive ROI notification using dedicated service
                 try {
-                  if (investment.userId && typeof investment.userId === 'object' && 'email' in investment.userId) {
-                    const user = investment.userId as any;
-                    const planName = typeof investment.planId === 'object' && 'name' in investment.planId 
-                      ? (investment.planId as any).name 
-                      : 'Investment Plan';
-                    
-                    // Send email notification
-                    await this.emailService.sendRoiPaymentNotification(
-                      user.email,
-                      user.firstName,
-                      {
-                        amount: currentAccumulatedRoi,
-                        currency: investment.currency,
-                        investmentName: planName,
-                        paymentDate: new Date(),
-                        paymentType: '24-Hour Cycle',
-                        transactionId: `ROI-${investment._id}-${Date.now()}`,
-                      }
-                    );
-                    
-                    // Create in-app notification
-                    await this.notificationsService.createNotification(
-                      investment.userId.toString(),
-                      'ROI Payment Received',
-                      `You've received ₦${currentAccumulatedRoi.toFixed(4)} ROI from your ${planName} investment.`,
-                      NotificationType.SUCCESS,
-                      NotificationCategory.ROI,
-                      {
-                        actionUrl: '/dashboard/investments',
-                        actionText: 'View Investment',
-                        relatedId: investment._id,
-                        relatedType: 'investment',
-                        metadata: {
-                          roiAmount: currentAccumulatedRoi,
-                          currency: investment.currency,
-                          planName: planName,
-                          cycleType: '24-hour'
-                        }
-                      }
-                    );
-                  }
+                  await this.roiNotificationsService.sendRoiCycleNotification(
+                    investment._id.toString(),
+                    currentAccumulatedRoi,
+                    '24-hour'
+                  );
                 } catch (notificationError) {
                   this.logger.error(`❌ Failed to send ROI notification for investment ${investment._id}:`, notificationError);
                   // Don't fail the ROI process if notifications fail
