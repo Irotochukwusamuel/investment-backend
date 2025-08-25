@@ -195,8 +195,8 @@ export class TasksService implements OnModuleInit {
             // Update timestamps
             investment.lastRoiUpdate = now;
             
-            // Set next ROI cycle to 24 hours from now
-            const nextRoiCycleDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            // Set next ROI cycle to 24 hours from the last ROI update time
+            const nextRoiCycleDate = new Date(investment.lastRoiUpdate.getTime() + 24 * 60 * 60 * 1000);
             investment.nextRoiCycleDate = nextRoiCycleDate;
             
             // Set next hourly update to 1 hour from the last update time
@@ -486,37 +486,23 @@ export class TasksService implements OnModuleInit {
   }
 
   private async createRoiTransaction(investment: InvestmentDocument, amount: number, type: 'daily' | 'completion' | 'hourly' | '24-hour-cycle'): Promise<TransactionDocument> {
-    // Check if a similar transaction already exists for this investment within the last 5 minutes
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    // Check if a similar transaction already exists for this investment within the last 30 seconds
+    // This prevents duplicate transactions when cron job runs every 10 seconds
+    const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
     const existingTransaction = await this.transactionModel.findOne({
       userId: investment.userId,
       investmentId: investment._id,
       type: 'roi',
       status: TransactionStatus.SUCCESS,
-      createdAt: { $gte: fiveMinutesAgo },
+      createdAt: { $gte: thirtySecondsAgo },
       // Use a range for amount to handle floating point precision issues
       amount: { $gte: amount * 0.99, $lte: amount * 1.01 },
       currency: investment.currency
     });
 
     if (existingTransaction) {
-      this.logger.log(`Skipping duplicate ROI transaction for investment ${investment._id} - transaction already exists within last 5 minutes`);
+      this.logger.log(`Skipping duplicate ROI transaction for investment ${investment._id} - transaction already exists within last 30 seconds`);
       return existingTransaction;
-    }
-
-    // Additional check: Look for any ROI transaction for this investment in the last minute
-    const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
-    const recentTransaction = await this.transactionModel.findOne({
-      userId: investment.userId,
-      investmentId: investment._id,
-      type: 'roi',
-      status: TransactionStatus.SUCCESS,
-      createdAt: { $gte: oneMinuteAgo }
-    });
-
-    if (recentTransaction) {
-      this.logger.log(`Skipping ROI transaction for investment ${investment._id} - recent transaction exists within last minute`);
-      return recentTransaction;
     }
 
     const transaction = new this.transactionModel({
@@ -525,7 +511,7 @@ export class TasksService implements OnModuleInit {
       status: TransactionStatus.SUCCESS,
       amount: amount,
       currency: investment.currency,
-      description: `${type === 'completion' ? 'Final' : type === 'hourly' ? 'Hourly' : 'Daily'} ROI payment for investment`,
+      description: `${type === 'completion' ? 'Final' : type === 'hourly' ? 'Hourly' : type === '24-hour-cycle' ? '24-Hour Cycle' : 'Daily'} ROI payment for investment ${investment._id}`,
       reference: `ROI-${investment._id}-${Date.now()}`,
       investmentId: investment._id,
       planId: investment.planId,
