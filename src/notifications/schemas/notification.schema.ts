@@ -19,6 +19,7 @@ export enum NotificationCategory {
   BONUS = 'bonus',
   WITHDRAWAL = 'withdrawal',
   DEPOSIT = 'deposit',
+  ROI = 'roi',
 }
 
 @Schema({ timestamps: true })
