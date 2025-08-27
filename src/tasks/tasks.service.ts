@@ -92,7 +92,7 @@ export class TasksService implements OnModuleInit {
     await this.manageCountdowns();
   }
 
-  @Cron(CronExpression.EVERY_10_SECONDS, {
+  @Cron(CronExpression.EVERY_MINUTE, {
     name: 'updateInvestmentRoi',
     timeZone: 'Africa/Lagos'
   })
@@ -115,11 +115,11 @@ export class TasksService implements OnModuleInit {
               { nextRoiUpdate: { $lte: new Date() } }
             ]
           },
-          // AND prevent processing investments that were updated in the last 2 minutes
+          // AND prevent processing investments that were updated in the last 30 seconds (reduced from 2 minutes)
           {
             $or: [
               { lastRoiUpdate: { $exists: false } },
-              { lastRoiUpdate: { $lt: new Date(Date.now() - 2 * 60 * 1000) } }
+              { lastRoiUpdate: { $lt: new Date(Date.now() - 30 * 1000) } }
             ]
           }
         ]
@@ -226,19 +226,33 @@ export class TasksService implements OnModuleInit {
             const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
             const hourlyRoiAmount = dailyRoiAmount / 24;
             
-            // Add hourly ROI to earnedAmount
-            const currentEarnedAmount = investment.earnedAmount || 0;
-            const newEarnedAmount = currentEarnedAmount + hourlyRoiAmount;
-            investment.earnedAmount = Math.round(newEarnedAmount * 10000) / 10000;
+            // Calculate current cycle earnings based on time elapsed since last 24-hour cycle
+            const startDate = new Date(investment.startDate);
+            const elapsed = now.getTime() - startDate.getTime();
+            const hoursElapsed = elapsed / (1000 * 60 * 60);
+            
+            let currentCycleEarnings;
+            if (hoursElapsed < 24) {
+              // Investment is less than 24 hours old - first cycle
+              currentCycleEarnings = hourlyRoiAmount * hoursElapsed;
+            } else {
+              // Investment is older than 24 hours
+              const completeCycles = Math.floor(hoursElapsed / 24);
+              const hoursInCurrentCycle = hoursElapsed % 24;
+              currentCycleEarnings = hourlyRoiAmount * hoursInCurrentCycle;
+            }
+            
+            // Update earnedAmount to reflect current cycle earnings
+            investment.earnedAmount = Math.round(currentCycleEarnings * 10000) / 10000;
             
             // Update timestamps
             investment.lastRoiUpdate = now;
             
-            // Set next hourly update to 1 hour from the last update time
-            const nextRoiUpdate = new Date(investment.lastRoiUpdate.getTime() + 60 * 60 * 1000);
+            // Set next hourly update to 1 hour from now
+            const nextRoiUpdate = new Date(now.getTime() + 60 * 60 * 1000);
             investment.nextRoiUpdate = nextRoiUpdate;
             
-            this.logger.log(`✅ Accumulated ${hourlyRoiAmount.toFixed(4)} ${investment.currency} ROI for investment ${investment._id}. Total earned: ${investment.earnedAmount.toFixed(4)}`);
+            this.logger.log(`✅ Updated current cycle earnings to ${investment.earnedAmount.toFixed(4)} ${investment.currency} for investment ${investment._id}`);
           }
           
           // Check if investment is completed

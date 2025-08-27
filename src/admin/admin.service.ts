@@ -638,6 +638,48 @@ export class AdminService {
     return { message: 'Investment deleted successfully' };
   }
 
+  /**
+   * Recalculate and reconcile an investment's earnings based on elapsed time
+   * - earnedAmount: current 24h cycle earnings (resets every 24h)
+   * - totalAccumulatedRoi: total earnings since start (never resets)
+   * - nextRoiCycleDate: aligned to the next 24h boundary from start
+   */
+  async reconcileInvestment(id: string) {
+    const investment = await this.investmentModel.findById(id);
+    if (!investment) {
+      throw new NotFoundException('Investment not found');
+    }
+
+    const now = new Date();
+    const startDate = new Date(investment.startDate);
+    const elapsedMs = now.getTime() - startDate.getTime();
+    const hoursElapsed = elapsedMs / (1000 * 60 * 60);
+    const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
+    const hourlyRoiAmount = dailyRoiAmount / 24;
+
+    // Compute expected totals
+    const completeCycles = Math.floor(hoursElapsed / 24);
+    const hoursInCurrentCycle = hoursElapsed < 24 ? hoursElapsed : hoursElapsed % 24;
+    const expectedCurrentCycle = hourlyRoiAmount * hoursInCurrentCycle;
+    const expectedTotal = hoursElapsed < 24
+      ? expectedCurrentCycle
+      : (dailyRoiAmount * completeCycles) + expectedCurrentCycle;
+
+    // Align nextRoiCycleDate to the next 24h boundary from start
+    const lastCycleStart = new Date(startDate.getTime() + completeCycles * 24 * 60 * 60 * 1000);
+    const nextRoiCycleDate = new Date(lastCycleStart.getTime() + 24 * 60 * 60 * 1000);
+
+    investment.earnedAmount = Math.round(expectedCurrentCycle * 10000) / 10000;
+    investment.totalAccumulatedRoi = Math.round(expectedTotal * 10000) / 10000;
+    investment.lastRoiUpdate = now;
+    investment.nextRoiUpdate = new Date(now.getTime() + 60 * 60 * 1000);
+    investment.nextRoiCycleDate = nextRoiCycleDate;
+
+    await investment.save();
+
+    return investment;
+  }
+
   // Withdrawal Management
   async getAllWithdrawals(query: any) {
     const { status, currency, page = 1, limit = 10 } = query;

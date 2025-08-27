@@ -151,6 +151,13 @@ export class AdminController {
     return this.adminService.updateInvestment(id, updateData);
   }
 
+  @Post('investments/:id/reconcile')
+  @ApiOperation({ summary: 'Recalculate and reconcile earnings for an investment (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Investment reconciled successfully' })
+  async reconcileInvestment(@Param('id') id: string) {
+    return this.adminService.reconcileInvestment(id);
+  }
+
   @Delete('investments/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete investment (Admin only)' })
