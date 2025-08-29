@@ -158,6 +158,27 @@ export class AdminController {
     return this.adminService.reconcileInvestment(id);
   }
 
+  @Post('investments/:id/test-hourly-cycle')
+  @ApiOperation({ summary: 'Test hourly ROI cycle for an investment (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Hourly cycle test completed' })
+  async testHourlyCycle(@Param('id') id: string) {
+    return this.adminService.testHourlyCycle(id);
+  }
+
+  @Post('investments/:id/test-daily-cycle')
+  @ApiOperation({ summary: 'Test daily ROI cycle completion for an investment (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Daily cycle test completed' })
+  async testDailyCycle(@Param('id') id: string) {
+    return this.adminService.testDailyCycle(id);
+  }
+
+  @Post('investments/:id/test-end-investment')
+  @ApiOperation({ summary: 'Test end of investment (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Investment end test completed' })
+  async testEndInvestment(@Param('id') id: string) {
+    return this.adminService.testEndInvestment(id);
+  }
+
   @Delete('investments/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete investment (Admin only)' })

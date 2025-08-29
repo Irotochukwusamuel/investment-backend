@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import { User, UserDocument } from '../users/schemas/user.schema';
-import { Investment, InvestmentDocument } from '../investments/schemas/investment.schema';
+import { Investment, InvestmentDocument, InvestmentStatus } from '../investments/schemas/investment.schema';
 import { Withdrawal, WithdrawalDocument } from '../withdrawals/schemas/withdrawal.schema';
 import { Wallet, WalletDocument, WalletType } from '../wallet/schemas/wallet.schema';
 import { InvestmentPlan, InvestmentPlanDocument } from '../investment-plans/schemas/investment-plan.schema';
@@ -17,7 +17,7 @@ import { InvestmentPlansService } from '../investment-plans/investment-plans.ser
 import { NoticeService } from '../notice/notice.service';
 import { EmailService } from '../email/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { TransactionStatus } from '../transactions/schemas/transaction.schema';
+import { TransactionStatus, TransactionType } from '../transactions/schemas/transaction.schema';
 import { NotificationType, NotificationCategory } from '../notifications/schemas/notification.schema';
 import { TransactionsService } from '../transactions/transactions.service';
 import { Transaction, TransactionDocument } from '../transactions/schemas/transaction.schema';
@@ -660,7 +660,7 @@ export class AdminService {
     // Compute expected totals
     const completeCycles = Math.floor(hoursElapsed / 24);
     const hoursInCurrentCycle = hoursElapsed < 24 ? hoursElapsed : hoursElapsed % 24;
-    const expectedCurrentCycle = hourlyRoiAmount * hoursInCurrentCycle;
+    const expectedCurrentCycle = hourlyRoiAmount * hoursElapsed;
     const expectedTotal = hoursElapsed < 24
       ? expectedCurrentCycle
       : (dailyRoiAmount * completeCycles) + expectedCurrentCycle;
@@ -678,6 +678,165 @@ export class AdminService {
     await investment.save();
 
     return investment;
+  }
+
+  /**
+   * Test method: Simulate hourly ROI cycle for an investment
+   * This advances the investment by 1 hour and calculates the corresponding ROI
+   */
+  async testHourlyCycle(id: string) {
+    const investment = await this.investmentModel.findById(id);
+    if (!investment) {
+      throw new NotFoundException('Investment not found');
+    }
+
+    if (investment.status !== 'active') {
+      throw new BadRequestException('Investment must be active to test hourly cycle');
+    }
+
+    const now = new Date();
+    const hourlyRoiAmount = (investment.amount * investment.dailyRoi) / 100 / 24;
+    
+    // Add 1 hour of ROI to current cycle earnings
+    investment.earnedAmount = (investment.earnedAmount || 0) + hourlyRoiAmount;
+    investment.earnedAmount = Math.round(investment.earnedAmount * 10000) / 10000;
+    
+    // Update timestamps
+    investment.lastRoiUpdate = now;
+    investment.nextRoiUpdate = new Date(now.getTime() + 60 * 60 * 1000);
+    
+    await investment.save();
+    
+    return {
+      message: 'Hourly cycle test completed',
+      investment,
+      hourlyRoiAdded: hourlyRoiAmount,
+      newEarnedAmount: investment.earnedAmount
+    };
+  }
+
+  /**
+   * Test method: Simulate daily ROI cycle completion for an investment
+   * This transfers current cycle earnings to total accumulated ROI and resets current cycle
+   */
+  async testDailyCycle(id: string) {
+    const investment = await this.investmentModel.findById(id);
+    if (!investment) {
+      throw new NotFoundException('Investment not found');
+    }
+
+    if (investment.status !== 'active') {
+      throw new BadRequestException('Investment must be active to test daily cycle');
+    }
+
+    const now = new Date();
+    const currentCycleEarnings = investment.earnedAmount || 0;
+    
+    // Transfer current cycle earnings to total accumulated ROI
+    investment.totalAccumulatedRoi = (investment.totalAccumulatedRoi || 0) + currentCycleEarnings;
+    investment.totalAccumulatedRoi = Math.round(investment.totalAccumulatedRoi * 10000) / 10000;
+    
+    // Reset current cycle earnings
+    investment.earnedAmount = 0;
+    
+    // Update timestamps
+    investment.lastRoiUpdate = now;
+    investment.nextRoiUpdate = new Date(now.getTime() + 60 * 60 * 1000);
+    investment.nextRoiCycleDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    
+    await investment.save();
+    
+    return {
+      message: 'Daily cycle test completed',
+      investment,
+      cycleEarningsTransferred: currentCycleEarnings,
+      newTotalAccumulatedRoi: investment.totalAccumulatedRoi
+    };
+  }
+
+  /**
+   * Test method: Simulate end of investment
+   * This completes the investment and transfers all earnings to user's wallet
+   */
+  async testEndInvestment(id: string) {
+    const investment = await this.investmentModel.findById(id);
+    if (!investment) {
+      throw new NotFoundException('Investment not found');
+    }
+
+    if (investment.status !== InvestmentStatus.ACTIVE) {
+      throw new BadRequestException('Investment must be active to test end of investment');
+    }
+
+    const now = new Date();
+    const userIdString = (investment as any).userId && typeof (investment as any).userId === 'object' && (investment as any).userId._id
+      ? (investment as any).userId._id.toString()
+      : (investment.userId as unknown as Types.ObjectId).toString();
+    const totalEarnings = (investment.totalAccumulatedRoi || 0) + (investment.earnedAmount || 0);
+    
+    // Update investment status
+    investment.status = InvestmentStatus.COMPLETED;
+    investment.endDate = now;
+    investment.earnedAmount = 0;
+    investment.lastRoiUpdate = now;
+    
+    // Calculate final return amount (principal + total earnings)
+    const finalReturnAmount = investment.amount + totalEarnings;
+    
+    await investment.save();
+    
+          // Transfer earnings to user's wallet
+      try {
+        await this.walletService.deposit(
+          userIdString,
+          {
+            walletType: WalletType.MAIN,
+            amount: totalEarnings,
+            currency: investment.currency,
+            description: 'Investment completion - Earnings transferred'
+          }
+        );
+        
+        // Create transaction record
+        await this.transactionsService.create({
+          userId: userIdString,
+          type: TransactionType.INVESTMENT,
+          amount: totalEarnings,
+          currency: investment.currency,
+          status: TransactionStatus.SUCCESS,
+          description: `Investment ${investment._id} completed - Earnings transferred`,
+          investmentId: investment._id.toString()
+        });
+        
+        // Send notification
+        await this.notificationsService.createNotification(
+          userIdString,
+          'Investment Completed',
+          `Your investment has been completed. Total earnings: ${investment.currency === 'naira' ? '₦' : ''}${totalEarnings.toFixed(2)}`,
+          NotificationType.SUCCESS,
+          NotificationCategory.INVESTMENT,
+          {
+            metadata: {
+              investmentId: investment._id.toString(),
+              totalEarnings: totalEarnings
+            }
+          }
+        );
+      
+    } catch (error) {
+      // If wallet transfer fails, revert investment status
+      investment.status = InvestmentStatus.ACTIVE;
+      investment.endDate = investment.endDate;
+      await investment.save();
+      throw new BadRequestException(`Failed to transfer earnings to wallet: ${error.message}`);
+    }
+    
+    return {
+      message: 'Investment end test completed',
+      investment,
+      totalEarningsTransferred: totalEarnings,
+      finalReturnAmount: finalReturnAmount
+    };
   }
 
   // Withdrawal Management
