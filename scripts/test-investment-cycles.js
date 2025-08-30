@@ -91,3 +91,4 @@ async function testInvestmentCycles() {
 
 // Run the test
 testInvestmentCycles();
+

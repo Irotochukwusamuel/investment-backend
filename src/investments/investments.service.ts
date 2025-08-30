@@ -849,13 +849,15 @@ export class InvestmentsService {
         
         await this.investmentModel.findByIdAndUpdate(
           investment._id,
-          { 
-            $set: { 
+          {
+            $set: {
               earnedAmount: 0,
               lastRoiUpdate: now,
               nextRoiCycleDate: nextRoiCycleDate
+            },
+            $inc: {
+              totalAccumulatedRoi: investment.earnedAmount // Add the withdrawn amount to totalAccumulatedRoi
             }
-            // Note: totalAccumulatedRoi is NOT reset - it keeps the full accumulated amount
           }
         );
       }
