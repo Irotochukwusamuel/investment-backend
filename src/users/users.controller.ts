@@ -181,7 +181,7 @@ export class UsersController {
     if (!result.canWithdraw) {
       // Get bonus withdrawal period from settings
       const settings = await this.settingsService.getBonusWithdrawalPeriod();
-      const bonusPeriodMs = settings.bonusWithdrawalPeriodMs;
+      const bonusPeriodMs = settings.periodMs;
       
       // Use first bonus received date for countdown calculation
       let startDate: Date;

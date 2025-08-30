@@ -10,6 +10,7 @@ import { WalletModule } from '../wallet/wallet.module';
 import { EmailModule } from '../email/email.module';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     EmailModule,
     TransactionsModule,
     NotificationsModule,
+    SettingsModule,
   ],
   controllers: [TasksController],
   providers: [TasksService],

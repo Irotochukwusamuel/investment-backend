@@ -315,7 +315,16 @@ export class InvestmentsService {
   async create(createInvestmentDto: CreateInvestmentDto, userId: string): Promise<Investment> {
     const now = new Date();
     const activatedAt = now;
-    const nextRoiCycleDate = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
+    
+    // Ensure proper timestamp initialization for ROI cycles
+    // Start the 24-hour cycle from NOW (when investment is activated)
+    const nextRoiCycleDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    
+    // Start the hourly ROI updates from NOW
+    const nextRoiUpdate = new Date(now.getTime() + 60 * 60 * 1000);
+    
+    // Set lastRoiUpdate to now to establish the baseline
+    const lastRoiUpdate = now;
     
     const investment = new this.investmentModel({
       ...createInvestmentDto,
@@ -324,6 +333,11 @@ export class InvestmentsService {
       transactionId: createInvestmentDto.transactionId ? new Types.ObjectId(createInvestmentDto.transactionId) : undefined,
       activatedAt,
       nextRoiCycleDate,
+      nextRoiUpdate,
+      lastRoiUpdate,
+      // Initialize earned amount and total accumulated ROI
+      earnedAmount: 0,
+      totalAccumulatedRoi: 0,
     });
 
     return investment.save();

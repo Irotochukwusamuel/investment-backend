@@ -14,6 +14,34 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { RoiNotificationsService } from '../notifications/roi-notifications.service';
 import { NotificationType, NotificationCategory } from '../notifications/schemas/notification.schema';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { SettingsService } from '../settings/settings.service';
+
+// Get current timing configuration from database
+async function getTimingConfig(settingsService: SettingsService) {
+  try {
+    const settings = await settingsService.getTestingModeSettings();
+    return {
+      HOURLY_UPDATE_INTERVAL: settings.hourlyUpdateInterval,
+      DAILY_CYCLE_INTERVAL: settings.dailyCycleInterval,
+      MONTHLY_CYCLE_INTERVAL: settings.monthlyCycleInterval,
+      OVERDUE_THRESHOLD: settings.overdueThreshold,
+      MIN_UPDATE_INTERVAL: settings.minUpdateInterval,
+      COUNTDOWN_UPDATE_THRESHOLD: settings.countdownUpdateThreshold,
+      IS_TESTING_MODE: settings.enabled,
+    };
+  } catch (error) {
+    // Fallback to production timings if database is not available
+    return {
+      HOURLY_UPDATE_INTERVAL: 60 * 60 * 1000,        // 1 hour (60 minutes)
+      DAILY_CYCLE_INTERVAL: 24 * 60 * 60 * 1000,     // 24 hours
+      MONTHLY_CYCLE_INTERVAL: 30 * 24 * 60 * 60 * 1000, // 30 days
+      OVERDUE_THRESHOLD: 60 * 60 * 1000,             // 1 hour
+      MIN_UPDATE_INTERVAL: 30 * 1000,                 // 30 seconds
+      COUNTDOWN_UPDATE_THRESHOLD: 60 * 1000,          // 1 minute
+      IS_TESTING_MODE: false,
+    };
+  }
+}
 
 @Injectable()
 export class TasksService implements OnModuleInit {
@@ -29,6 +57,7 @@ export class TasksService implements OnModuleInit {
     private readonly transactionsService: TransactionsService,
     private readonly notificationsService: NotificationsService,
     private readonly roiNotificationsService: RoiNotificationsService,
+    private readonly settingsService: SettingsService,
     private readonly eventEmitter: EventEmitter2,
   ) {
     // Initialize FINTAVA client
@@ -67,6 +96,23 @@ export class TasksService implements OnModuleInit {
     await this.updateInvestmentRoi();
   }
 
+  // Method to show current mode and timings
+  async showCurrentMode() {
+    try {
+      const config = await getTimingConfig(this.settingsService);
+      const mode = config.IS_TESTING_MODE ? 'TESTING' : 'PRODUCTION';
+      this.logger.log(`🔧 Current Mode: ${mode}`);
+      this.logger.log(`📊 Current Timings:`);
+      this.logger.log(`   Hourly updates: ${config.HOURLY_UPDATE_INTERVAL/1000} seconds`);
+      this.logger.log(`   Daily cycles: ${config.DAILY_CYCLE_INTERVAL/60000} minutes`);
+      this.logger.log(`   Monthly cycles: ${config.MONTHLY_CYCLE_INTERVAL/3600000} hours`);
+      this.logger.log(`   Overdue threshold: ${config.OVERDUE_THRESHOLD/1000} seconds`);
+      this.logger.log(`   Min update interval: ${config.MIN_UPDATE_INTERVAL/1000} seconds`);
+    } catch (error) {
+      this.logger.error('❌ Error getting current mode:', error);
+    }
+  }
+
   // Manual trigger method for testing hourly accumulation
   async triggerHourlyRoiAccumulation() {
     this.logger.log('🔧 Manually triggering hourly ROI accumulation...');
@@ -97,35 +143,46 @@ export class TasksService implements OnModuleInit {
     timeZone: 'Africa/Lagos'
   })
   async updateInvestmentRoi() {
-    this.logger.log('🔄 Starting ROI update task (24-hour cycles + hourly accumulation)');
-    
-    // Use a Set to track investments being processed to prevent concurrent processing
-    const processingInvestments = new Set<string>();
-    
     try {
-      // Find investments that need either 24-hour cycle updates OR hourly ROI accumulation
+      const config = await getTimingConfig(this.settingsService);
+      const mode = config.IS_TESTING_MODE ? 'TESTING' : 'PRODUCTION';
+      this.logger.log(`🔄 Starting ROI update task (${mode} MODE: ${config.HOURLY_UPDATE_INTERVAL/1000}s hourly, ${config.DAILY_CYCLE_INTERVAL/60000}m daily, ${config.MONTHLY_CYCLE_INTERVAL/3600000}h monthly)`);
+      
+      // Use a Set to track investments being processed to prevent concurrent processing
+      const processingInvestments = new Set<string>();
+      
+      const now = new Date();
+      
+      // IMPROVED QUERY: Find investments that need updates OR are overdue
       const activeInvestments = await this.investmentModel.find({
         status: InvestmentStatus.ACTIVE,
-        endDate: { $gt: new Date() },
+        endDate: { $gt: now },
         $and: [
-          // Either 24-hour cycle is due OR hourly ROI accumulation is due
+          // Either 24-hour cycle is due OR hourly ROI accumulation is due OR investment is overdue
           {
             $or: [
-              { nextRoiCycleDate: { $lte: new Date() } },
-              { nextRoiUpdate: { $lte: new Date() } }
+              { nextRoiCycleDate: { $lte: now } },
+              { nextRoiUpdate: { $lte: now } },
+              // ADD OVERDUE DETECTION: Check if investment hasn't been updated in over the configured threshold
+              { 
+                $and: [
+                  { lastRoiUpdate: { $exists: true } },
+                  { lastRoiUpdate: { $lt: new Date(now.getTime() - config.OVERDUE_THRESHOLD) } }
+                ]
+              }
             ]
           },
-          // AND prevent processing investments that were updated in the last 30 seconds (reduced from 2 minutes)
+          // AND prevent processing investments that were updated in the last configured interval
           {
             $or: [
               { lastRoiUpdate: { $exists: false } },
-              { lastRoiUpdate: { $lt: new Date(Date.now() - 30 * 1000) } }
+              { lastRoiUpdate: { $lt: new Date(now.getTime() - config.MIN_UPDATE_INTERVAL) } }
             ]
           }
         ]
       }).populate('userId', 'email firstName lastName').populate('planId', 'name');
 
-      this.logger.log(`📊 Found ${activeInvestments.length} active investments that need 24-hour ROI cycle updates`);
+      this.logger.log(`📊 Found ${activeInvestments.length} active investments that need ROI updates`);
 
       let updatedCount = 0;
       for (const investment of activeInvestments) {
@@ -141,12 +198,14 @@ export class TasksService implements OnModuleInit {
         processingInvestments.add(investmentId);
         
         try {
-          const now = new Date();
           const needs24HourCycle = investment.nextRoiCycleDate && investment.nextRoiCycleDate <= now;
           const needsHourlyUpdate = investment.nextRoiUpdate && investment.nextRoiUpdate <= now;
-
-          this.logger.log('needs24HourCycle', needs24HourCycle);
-          this.logger.log('needsHourlyUpdate', needsHourlyUpdate);
+          
+          // ADD OVERDUE DETECTION: Check if investment is overdue for updates
+          const lastUpdate = investment.lastRoiUpdate ? new Date(investment.lastRoiUpdate) : new Date(investment.startDate);
+          const isOverdue = (now.getTime() - lastUpdate.getTime()) >= config.OVERDUE_THRESHOLD;
+          
+          this.logger.log(`Investment ${investment._id}: needs24HourCycle=${needs24HourCycle}, needsHourlyUpdate=${needsHourlyUpdate}, isOverdue=${isOverdue}`);
           
           if (needs24HourCycle) {
             this.logger.log(`💰 Processing 24-hour ROI cycle for investment ${investment._id}: ${investment.amount} ${investment.currency}`);
@@ -206,21 +265,22 @@ export class TasksService implements OnModuleInit {
             // Reset earnedAmount to 0 for the start of the next 24-hour cycle
             investment.earnedAmount = 0;
             
-            // Update timestamps
+            // FIXED TIMESTAMP LOGIC: Set timestamps relative to NOW, not to lastRoiUpdate
             investment.lastRoiUpdate = now;
             
-            // Set next ROI cycle to 24 hours from the last ROI update time
-            const nextRoiCycleDate = new Date(investment.lastRoiUpdate.getTime() + 24 * 60 * 60 * 1000);
+            // Set next ROI cycle using configured interval from NOW
+            const nextRoiCycleDate = new Date(now.getTime() + config.DAILY_CYCLE_INTERVAL);
             investment.nextRoiCycleDate = nextRoiCycleDate;
             
-            // Set next hourly update to 1 hour from the last update time
-            const nextRoiUpdate = new Date(investment.lastRoiUpdate.getTime() + 60 * 60 * 1000);
+            // Set next hourly update using configured interval from NOW
+            const nextRoiUpdate = new Date(now.getTime() + config.HOURLY_UPDATE_INTERVAL);
             investment.nextRoiUpdate = nextRoiUpdate;
             
             this.logger.log(`✅ Completed 24-hour ROI cycle for investment ${investment._id}. Total accumulated ROI: ${investment.totalAccumulatedRoi}`);
             
-          } else if (needsHourlyUpdate) {
-            this.logger.log(`💰 Processing hourly ROI accumulation for investment ${investment._id}: ${investment.amount} ${investment.currency}`);
+          } else if (needsHourlyUpdate || isOverdue) {
+            // FIXED: Process hourly updates OR overdue investments
+            this.logger.log(`💰 Processing ${isOverdue ? 'overdue ' : ''}hourly ROI accumulation for investment ${investment._id}: ${investment.amount} ${investment.currency}`);
             
             // Calculate hourly ROI
             const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
@@ -245,11 +305,11 @@ export class TasksService implements OnModuleInit {
             // Update earnedAmount to reflect current cycle earnings
             investment.earnedAmount = Math.round(currentCycleEarnings * 10000) / 10000;
             
-            // Update timestamps
+            // FIXED TIMESTAMP LOGIC: Set timestamps relative to NOW
             investment.lastRoiUpdate = now;
             
-            // Set next hourly update to 1 hour from now
-            const nextRoiUpdate = new Date(now.getTime() + 60 * 60 * 1000);
+            // Set next hourly update using configured interval from NOW
+            const nextRoiUpdate = new Date(now.getTime() + config.HOURLY_UPDATE_INTERVAL);
             investment.nextRoiUpdate = nextRoiUpdate;
             
             this.logger.log(`✅ Updated current cycle earnings to ${investment.earnedAmount.toFixed(4)} ${investment.currency} for investment ${investment._id}`);
@@ -257,6 +317,45 @@ export class TasksService implements OnModuleInit {
           
           // Check if investment is completed
           if (new Date() >= investment.endDate) {
+            // Before completing, transfer any remaining earned amount
+            if (investment.earnedAmount > 0) {
+              this.logger.log(`💰 Final ROI transfer for completed investment ${investment._id}: ${investment.earnedAmount} ${investment.currency}`);
+              
+              const userIdString = investment.userId.toString();
+              
+              try {
+                if (investment.currency === 'naira') {
+                  await this.walletService.deposit(userIdString, {
+                    walletType: WalletType.MAIN,
+                    amount: investment.earnedAmount,
+                    currency: 'naira',
+                    description: `Final ROI payment for completed investment ${investment._id}`,
+                  });
+                } else {
+                  await this.walletService.deposit(userIdString, {
+                    walletType: WalletType.MAIN,
+                    amount: investment.earnedAmount,
+                    currency: 'usdt',
+                    description: `Final ROI payment for completed investment ${investment._id}`,
+                  });
+                }
+                
+                // Create final ROI transaction record
+                await this.createRoiTransaction(investment, investment.earnedAmount, 'completion');
+                
+                // Update totalAccumulatedRoi with the final amount
+                investment.totalAccumulatedRoi = (investment.totalAccumulatedRoi || 0) + investment.earnedAmount;
+                
+                // Reset earnedAmount to 0
+                investment.earnedAmount = 0;
+                
+                this.logger.log(`✅ Final ROI transfer completed for investment ${investment._id}`);
+              } catch (walletError) {
+                this.logger.error(`❌ Failed to transfer final ROI for completed investment ${investment._id}:`, walletError);
+                // Continue with completion even if wallet transfer fails
+              }
+            }
+            
             investment.status = InvestmentStatus.COMPLETED;
             this.logger.log(`🎉 Investment ${investment._id} completed!`);
             
@@ -284,7 +383,7 @@ export class TasksService implements OnModuleInit {
           }
           
           // Save the investment if any changes were made
-          if (needs24HourCycle || needsHourlyUpdate) {
+          if (needs24HourCycle || needsHourlyUpdate || isOverdue) {
             await investment.save();
             updatedCount++;
           }
@@ -297,7 +396,7 @@ export class TasksService implements OnModuleInit {
         }
       }
       
-      this.logger.log(`🎯 24-hour ROI cycle update completed: ${updatedCount}/${activeInvestments.length} investments updated`);
+      this.logger.log(`🎯 ROI update completed: ${updatedCount}/${activeInvestments.length} investments updated`);
     } catch (error) {
       this.logger.error('❌ Error in updateInvestmentRoi task:', error);
     }
@@ -312,12 +411,15 @@ export class TasksService implements OnModuleInit {
     timeZone: 'Africa/Lagos'
   })
   async manageCountdowns() {
-    this.logger.log('🔄 Starting countdown management task');
-    
     try {
+      const config = await getTimingConfig(this.settingsService);
+      const mode = config.IS_TESTING_MODE ? 'TESTING' : 'PRODUCTION';
+      this.logger.log(`🔄 Starting countdown management task (${mode} MODE)`);
+      
+      const now = new Date();
       const activeInvestments = await this.investmentModel.find({
         status: InvestmentStatus.ACTIVE,
-        endDate: { $gt: new Date() }
+        endDate: { $gt: now }
       });
 
       this.logger.log(`📊 Found ${activeInvestments.length} active investments to check countdowns`);
@@ -325,19 +427,40 @@ export class TasksService implements OnModuleInit {
       let updatedCount = 0;
       for (const investment of activeInvestments) {
         try {
-          const now = new Date();
+          // FIXED: Handle cases where nextRoiUpdate might be null
+          if (!investment.nextRoiUpdate) {
+            // If nextRoiUpdate is not set, set it using configured interval
+            const newNextRoiUpdate = new Date(now.getTime() + config.HOURLY_UPDATE_INTERVAL);
+            investment.nextRoiUpdate = newNextRoiUpdate;
+            await investment.save();
+            
+            this.logger.log(`⏰ Fixed missing nextRoiUpdate for investment ${investment._id}: ${newNextRoiUpdate.toISOString()}`);
+            updatedCount++;
+            continue;
+          }
+          
           const nextRoiUpdate = new Date(investment.nextRoiUpdate);
           const timeUntilNext = nextRoiUpdate.getTime() - now.getTime();
           
-          // If nextRoiUpdate is in the past or very close (within 1 minute), update it
-          if (timeUntilNext <= 60 * 1000) {
-            const newNextRoiUpdate = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour from now
+          // If nextRoiUpdate is in the past or very close (within configured threshold), update it
+          if (timeUntilNext <= config.COUNTDOWN_UPDATE_THRESHOLD) {
+            const newNextRoiUpdate = new Date(now.getTime() + config.HOURLY_UPDATE_INTERVAL);
             investment.nextRoiUpdate = newNextRoiUpdate;
             await investment.save();
             
             this.logger.log(`⏰ Updated countdown for investment ${investment._id}: ${nextRoiUpdate.toISOString()} → ${newNextRoiUpdate.toISOString()}`);
             updatedCount++;
           }
+          
+          // FIXED: Also check if investment is overdue and needs immediate processing
+          const lastUpdate = investment.lastRoiUpdate ? new Date(investment.lastRoiUpdate) : new Date(investment.startDate);
+          const isOverdue = (now.getTime() - lastUpdate.getTime()) >= config.OVERDUE_THRESHOLD;
+          
+          if (isOverdue) {
+            this.logger.log(`⚠️ Investment ${investment._id} is overdue for ROI update (${Math.floor((now.getTime() - lastUpdate.getTime()) / (1000 * 60))} minutes overdue)`);
+            // The main ROI update cron job will handle this in the next minute
+          }
+          
         } catch (error) {
           this.logger.error(`❌ Error managing countdown for investment ${investment._id}:`, error);
         }
@@ -514,23 +637,42 @@ export class TasksService implements OnModuleInit {
   }
 
   private async createRoiTransaction(investment: InvestmentDocument, amount: number, type: 'daily' | 'completion' | 'hourly' | '24-hour-cycle'): Promise<TransactionDocument> {
-    // Check if a similar transaction already exists for this investment within the last 30 seconds
-    // This prevents duplicate transactions when cron job runs every 10 seconds
-    const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
+    // Check if a similar transaction already exists for this investment within the last 60 seconds
+    // This prevents duplicate transactions when cron job runs every minute
+    const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
     const existingTransaction = await this.transactionModel.findOne({
       userId: investment.userId,
       investmentId: investment._id,
       type: 'roi',
       status: TransactionStatus.SUCCESS,
-      createdAt: { $gte: thirtySecondsAgo },
+      createdAt: { $gte: sixtySecondsAgo },
       // Use a range for amount to handle floating point precision issues
       amount: { $gte: amount * 0.99, $lte: amount * 1.01 },
-      currency: investment.currency
+      currency: investment.currency,
+      description: { $regex: new RegExp(`${type}.*ROI.*investment.*${investment._id}`, 'i') }
     });
 
     if (existingTransaction) {
-      this.logger.log(`Skipping duplicate ROI transaction for investment ${investment._id} - transaction already exists within last 30 seconds`);
+      this.logger.log(`⏭️ Skipping duplicate ROI transaction for investment ${investment._id} - transaction already exists within last 60 seconds`);
+      this.logger.log(`   Existing: ${existingTransaction.amount} ${existingTransaction.currency} at ${existingTransaction.createdAt}`);
+      this.logger.log(`   Attempted: ${amount} ${investment.currency} at ${new Date()}`);
       return existingTransaction;
+    }
+
+    // Additional check: Look for any ROI transaction in the last 5 minutes for this investment
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const recentRoiTransaction = await this.transactionModel.findOne({
+      userId: investment.userId,
+      investmentId: investment._id,
+      type: 'roi',
+      status: TransactionStatus.SUCCESS,
+      createdAt: { $gte: fiveMinutesAgo }
+    });
+
+    if (recentRoiTransaction) {
+      this.logger.log(`⚠️ Recent ROI transaction found for investment ${investment._id} within last 5 minutes`);
+      this.logger.log(`   Recent: ${recentRoiTransaction.amount} ${recentRoiTransaction.currency} at ${recentRoiTransaction.createdAt}`);
+      this.logger.log(`   Current: ${amount} ${investment.currency} at ${new Date()}`);
     }
 
     const transaction = new this.transactionModel({
@@ -547,7 +689,10 @@ export class TasksService implements OnModuleInit {
       isAutomated: true,
     });
     
-    return transaction.save();
+    const savedTransaction = await transaction.save();
+    this.logger.log(`✅ Created ROI transaction: ${savedTransaction._id} for investment ${investment._id} - ${amount} ${investment.currency} (${type})`);
+    
+    return savedTransaction;
   }
 
   private async processDepositTransaction(transaction: TransactionDocument): Promise<void> {
