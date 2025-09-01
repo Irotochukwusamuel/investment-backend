@@ -210,41 +210,44 @@ export class TasksService implements OnModuleInit {
           if (needs24HourCycle) {
             this.logger.log(`💰 Processing 24-hour ROI cycle for investment ${investment._id}: ${investment.amount} ${investment.currency}`);
             
-            // Calculate daily ROI amount for this investment
+            // Calculate daily ROI amount for this investment (exact amount to be paid per 24-hour cycle)
             const dailyRoiAmount = (investment.amount * investment.dailyRoi) / 100;
-            
-            // Get the current accumulated ROI (this is what shows in the green highlighted area)
-            const currentAccumulatedRoi = investment.earnedAmount || 0;
-            
-            // Transfer accumulated ROI to available balance (wallet) if there's any to transfer
-            if (currentAccumulatedRoi > 0) {
-              const userIdString = investment.userId.toString();
+
+            // Always pay the exact daily ROI amount for the 24-hour cycle
+            const payoutAmount = dailyRoiAmount;
+
+            // Transfer exact daily ROI to available balance (wallet)
+            if (payoutAmount > 0) {
+              // Ensure we have a valid userId string even when userId is populated
+              const userIdString = (investment.userId && typeof investment.userId === 'object' && (investment.userId as any)._id)
+                ? (investment.userId as any)._id.toString()
+                : investment.userId.toString();
               
               try {
                 if (investment.currency === 'naira') {
                   await this.walletService.deposit(userIdString, {
                     walletType: WalletType.MAIN,
-                    amount: currentAccumulatedRoi,
+                    amount: payoutAmount,
                     currency: 'naira',
                     description: `24-hour ROI cycle payment for investment ${investment._id}`,
                   });
                 } else {
                   await this.walletService.deposit(userIdString, {
                     walletType: WalletType.MAIN,
-                    amount: currentAccumulatedRoi,
+                    amount: payoutAmount,
                     currency: 'usdt',
                     description: `24-hour ROI cycle payment for investment ${investment._id}`,
                   });
                 }
                 
                 // Create ROI transaction record
-                await this.createRoiTransaction(investment, currentAccumulatedRoi, '24-hour-cycle');
+                await this.createRoiTransaction(investment, payoutAmount, '24-hour-cycle');
                 
                 // Send comprehensive ROI notification using dedicated service
                 try {
                   await this.roiNotificationsService.sendRoiCycleNotification(
                     investment._id.toString(),
-                    currentAccumulatedRoi,
+                    payoutAmount,
                     '24-hour'
                   );
                 } catch (notificationError) {
@@ -252,15 +255,15 @@ export class TasksService implements OnModuleInit {
                   // Don't fail the ROI process if notifications fail
                 }
                 
-                this.logger.log(`✅ Transferred ${currentAccumulatedRoi} ${investment.currency} ROI to wallet for investment ${investment._id}`);
+                this.logger.log(`✅ Transferred ${payoutAmount} ${investment.currency} ROI to wallet for investment ${investment._id}`);
               } catch (walletError) {
                 this.logger.error(`❌ Failed to transfer ROI to wallet for investment ${investment._id}:`, walletError);
                 // Continue processing the investment even if wallet transfer fails
               }
             }
             
-            // Update totalAccumulatedRoi (this tracks total ROI earned, never resets)
-            investment.totalAccumulatedRoi = (investment.totalAccumulatedRoi || 0) + currentAccumulatedRoi;
+            // Update totalAccumulatedRoi with the exact daily ROI amount (never resets)
+            investment.totalAccumulatedRoi = (investment.totalAccumulatedRoi || 0) + payoutAmount;
             
             // Reset earnedAmount to 0 for the start of the next 24-hour cycle
             investment.earnedAmount = 0;
