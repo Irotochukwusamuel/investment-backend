@@ -239,3 +239,7 @@ async function verifyInvestmentEarnings() {
 // Run the verification
 verifyInvestmentEarnings();
 
+
+
+
+

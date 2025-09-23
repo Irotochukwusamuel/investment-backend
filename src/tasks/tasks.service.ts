@@ -85,8 +85,9 @@ export class TasksService implements OnModuleInit {
     this.logger.log('📅 Scheduled cron jobs:');
     this.logger.log('   - ROI updates (every minute)');
     this.logger.log('   - Pending transactions processing (every 5 minutes)');
+    this.logger.log('   - Countdown management (every 5 minutes)');
+    this.logger.log('   - ROI integrity check (midnight)');
     this.logger.log('   - Daily cleanup (midnight)');
-    this.logger.log('   - Daily ROI reset (midnight)');
     this.logger.log('   - Weekly reports (every week)');
   }
 
@@ -136,6 +137,12 @@ export class TasksService implements OnModuleInit {
   async triggerCountdownManagement() {
     this.logger.log('🔧 Manually triggering countdown management...');
     await this.manageCountdowns();
+  }
+
+  // Manual trigger method for ROI integrity check
+  async triggerRoiIntegrityCheck() {
+    this.logger.log('🔧 Manually triggering ROI integrity check...');
+    await this.roiIntegrityCheck();
   }
 
   @Cron(CronExpression.EVERY_MINUTE, {
@@ -595,6 +602,74 @@ export class TasksService implements OnModuleInit {
     }
   }
 
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, {
+    name: 'roiIntegrityCheck',
+    timeZone: 'Africa/Lagos'
+  })
+  async roiIntegrityCheck() {
+    this.logger.log('🔍 Starting ROI integrity check task');
+    
+    try {
+      const startTime = Date.now();
+      let totalIssuesFound = 0;
+      let totalIssuesFixed = 0;
+      let totalOverpaymentRemoved = 0;
+      let totalTransactionsRemoved = 0;
+      
+      // Get all active investments
+      const activeInvestments = await this.investmentModel.find({ 
+        status: InvestmentStatus.ACTIVE 
+      });
+      
+      this.logger.log(`📊 Checking ${activeInvestments.length} active investments for discrepancies`);
+      
+      for (const investment of activeInvestments) {
+        try {
+          const issues = await this.checkInvestmentIntegrity(investment);
+          
+          if (issues.length > 0) {
+            totalIssuesFound += issues.length;
+            this.logger.log(`⚠️  Found ${issues.length} issues for investment ${investment._id}`);
+            
+            // Fix the issues
+            const fixResult = await this.fixInvestmentIssues(investment, issues);
+            totalIssuesFixed += fixResult.fixed;
+            totalOverpaymentRemoved += fixResult.overpaymentRemoved;
+            totalTransactionsRemoved += fixResult.transactionsRemoved;
+            
+            this.logger.log(`✅ Fixed ${fixResult.fixed} issues for investment ${investment._id}`);
+          }
+        } catch (error) {
+          this.logger.error(`❌ Error checking investment ${investment._id}:`, error.message);
+        }
+      }
+      
+      const duration = Date.now() - startTime;
+      
+      this.logger.log('🎯 ROI Integrity Check Summary:');
+      this.logger.log(`   Investments checked: ${activeInvestments.length}`);
+      this.logger.log(`   Issues found: ${totalIssuesFound}`);
+      this.logger.log(`   Issues fixed: ${totalIssuesFixed}`);
+      this.logger.log(`   Transactions removed: ${totalTransactionsRemoved}`);
+      this.logger.log(`   Overpayment removed: ₦${totalOverpaymentRemoved.toLocaleString()}`);
+      this.logger.log(`   Duration: ${duration}ms`);
+      
+      // Send alert if significant issues were found
+      if (totalIssuesFound > 10) {
+        await this.notificationsService.createNotification(
+          'admin',
+          'ROI Integrity Alert',
+          `ROI integrity check found ${totalIssuesFound} issues across ${activeInvestments.length} investments. ${totalIssuesFixed} issues were automatically fixed.`,
+          NotificationType.WARNING,
+          NotificationCategory.SYSTEM
+        );
+      }
+      
+    } catch (error) {
+      this.logger.error('❌ Error in ROI integrity check task:', error);
+    }
+  }
+
   // New method to recalculate total ROI for all investments
   async recalculateTotalRoiForAllInvestments() {
     this.logger.log('🔄 Starting total ROI recalculation for all investments');
@@ -639,43 +714,373 @@ export class TasksService implements OnModuleInit {
     }
   }
 
+  // Check investment integrity and return list of issues
+  private async checkInvestmentIntegrity(investment: InvestmentDocument): Promise<Array<{
+    type: 'duplicate_transactions' | 'total_mismatch' | 'wallet_mismatch' | 'missing_transactions' | 'overpayment';
+    description: string;
+    severity: 'low' | 'medium' | 'high';
+    data?: any;
+  }>> {
+    const issues: Array<{
+      type: 'duplicate_transactions' | 'total_mismatch' | 'wallet_mismatch' | 'missing_transactions' | 'overpayment';
+      description: string;
+      severity: 'low' | 'medium' | 'high';
+      data?: any;
+    }> = [];
+    
+    try {
+      // Get ROI transactions for this investment
+      const roiTransactions = await this.transactionModel.find({
+        userId: investment.userId,
+        type: 'roi',
+        status: TransactionStatus.SUCCESS
+      }).sort({ createdAt: 1 });
+      
+      if (roiTransactions.length === 0) {
+        // Check if investment should have transactions (older than 1 day)
+        const daysSinceStart = Math.floor((Date.now() - new Date(investment.startDate).getTime()) / (1000 * 60 * 60 * 24));
+        if (daysSinceStart > 0) {
+          issues.push({
+            type: 'missing_transactions',
+            description: `Investment is ${daysSinceStart} days old but has no ROI transactions`,
+            severity: 'high'
+          });
+        }
+        return issues;
+      }
+      
+      // Check for duplicate transactions
+      const dailyGroups = {};
+      roiTransactions.forEach(tx => {
+        const date = tx.createdAt.toISOString().split('T')[0];
+        if (!dailyGroups[date]) {
+          dailyGroups[date] = [];
+        }
+        dailyGroups[date].push(tx);
+      });
+      
+      let duplicateCount = 0;
+      let overpayment = 0;
+      
+      Object.keys(dailyGroups).forEach(date => {
+        const transactions = dailyGroups[date];
+        if (transactions.length > 1) {
+          duplicateCount += transactions.length - 1;
+          const dailyAmount = transactions[0].amount;
+          overpayment += dailyAmount * (transactions.length - 1);
+        }
+      });
+      
+      if (duplicateCount > 0) {
+        issues.push({
+          type: 'duplicate_transactions',
+          description: `Found ${duplicateCount} duplicate transactions causing ₦${overpayment.toLocaleString()} overpayment`,
+          severity: 'high',
+          data: { duplicateCount, overpayment }
+        });
+      }
+      
+      // Check if investment total matches transaction total
+      const transactionTotal = roiTransactions.reduce((sum, tx) => sum + tx.amount, 0);
+      const investmentTotal = investment.totalAccumulatedRoi || 0;
+      
+      if (Math.abs(investmentTotal - transactionTotal) > 1) {
+        issues.push({
+          type: 'total_mismatch',
+          description: `Investment total (₦${investmentTotal.toLocaleString()}) doesn't match transaction total (₦${transactionTotal.toLocaleString()})`,
+          severity: 'high',
+          data: { investmentTotal, transactionTotal, difference: investmentTotal - transactionTotal }
+        });
+      }
+      
+      // Check wallet balance consistency
+      const wallet = await this.walletService.findByUserAndType(investment.userId.toString(), WalletType.MAIN);
+      if (wallet) {
+        const expectedBalance = transactionTotal + (wallet.lockedNairaBonuses || 0) + (wallet.lockedUsdtBonuses || 0);
+        const actualBalance = investment.currency === 'naira' ? wallet.nairaBalance : wallet.usdtBalance;
+        
+        if (Math.abs(actualBalance - expectedBalance) > 1) {
+          issues.push({
+            type: 'wallet_mismatch',
+            description: `Wallet balance (₦${actualBalance.toLocaleString()}) doesn't match expected balance (₦${expectedBalance.toLocaleString()})`,
+            severity: 'medium',
+            data: { actualBalance, expectedBalance, difference: actualBalance - expectedBalance }
+          });
+        }
+      }
+      
+      // Check for overpayment (total accumulated ROI exceeds expected return)
+      const expectedReturn = investment.expectedReturn;
+      if (transactionTotal > expectedReturn) {
+        issues.push({
+          type: 'overpayment',
+          description: `Total ROI (₦${transactionTotal.toLocaleString()}) exceeds expected return (₦${expectedReturn.toLocaleString()})`,
+          severity: 'high',
+          data: { totalRoi: transactionTotal, expectedReturn, overpayment: transactionTotal - expectedReturn }
+        });
+      }
+      
+    } catch (error) {
+      this.logger.error(`Error checking investment integrity for ${investment._id}:`, error);
+    }
+    
+    return issues;
+  }
+
+  // Fix investment issues
+  private async fixInvestmentIssues(investment: InvestmentDocument, issues: Array<{
+    type: 'duplicate_transactions' | 'total_mismatch' | 'wallet_mismatch' | 'missing_transactions' | 'overpayment';
+    description: string;
+    severity: 'low' | 'medium' | 'high';
+    data?: any;
+  }>): Promise<{
+    fixed: number;
+    overpaymentRemoved: number;
+    transactionsRemoved: number;
+  }> {
+    let fixed = 0;
+    let overpaymentRemoved = 0;
+    let transactionsRemoved = 0;
+    
+    try {
+      for (const issue of issues) {
+        switch (issue.type) {
+          case 'duplicate_transactions':
+            const duplicateResult = await this.fixDuplicateTransactions(investment);
+            if (duplicateResult.success) {
+              fixed++;
+              overpaymentRemoved += duplicateResult.overpaymentRemoved;
+              transactionsRemoved += duplicateResult.transactionsRemoved;
+            }
+            break;
+            
+          case 'total_mismatch':
+            await this.fixTotalMismatch(investment);
+            fixed++;
+            break;
+            
+          case 'wallet_mismatch':
+            await this.fixWalletMismatch(investment);
+            fixed++;
+            break;
+            
+          case 'overpayment':
+            await this.fixOverpayment(investment);
+            fixed++;
+            break;
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Error fixing issues for investment ${investment._id}:`, error);
+    }
+    
+    return { fixed, overpaymentRemoved, transactionsRemoved };
+  }
+
+  // Fix duplicate transactions
+  private async fixDuplicateTransactions(investment: InvestmentDocument): Promise<{
+    success: boolean;
+    overpaymentRemoved: number;
+    transactionsRemoved: number;
+  }> {
+    try {
+      const roiTransactions = await this.transactionModel.find({
+        userId: investment.userId,
+        type: 'roi',
+        status: TransactionStatus.SUCCESS
+      }).sort({ createdAt: 1 });
+      
+      // Group by date
+      const dailyGroups = {};
+      roiTransactions.forEach(tx => {
+        const date = tx.createdAt.toISOString().split('T')[0];
+        if (!dailyGroups[date]) {
+          dailyGroups[date] = [];
+        }
+        dailyGroups[date].push(tx);
+      });
+      
+      let transactionsToRemove: any[] = [];
+      let overpayment = 0;
+      
+      Object.keys(dailyGroups).forEach(date => {
+        const transactions = dailyGroups[date];
+        if (transactions.length > 1) {
+          // Keep the first transaction, mark others for removal
+          for (let i = 1; i < transactions.length; i++) {
+            transactionsToRemove.push(transactions[i]._id);
+            overpayment += transactions[i].amount;
+          }
+        }
+      });
+      
+      if (transactionsToRemove.length > 0) {
+        await this.transactionModel.deleteMany({
+          _id: { $in: transactionsToRemove }
+        });
+        
+        // Update investment total
+        const remainingTransactions = await this.transactionModel.find({
+          userId: investment.userId,
+          type: 'roi',
+          status: TransactionStatus.SUCCESS
+        });
+        
+        const correctTotal = remainingTransactions.reduce((sum, tx) => sum + tx.amount, 0);
+        await this.investmentModel.updateOne(
+          { _id: investment._id },
+          { $set: { totalAccumulatedRoi: correctTotal } }
+        );
+        
+        // Update wallet balance
+        const wallet = await this.walletService.findByUserAndType(investment.userId.toString(), WalletType.MAIN);
+        if (wallet) {
+          if (investment.currency === 'naira') {
+            wallet.nairaBalance -= overpayment;
+            wallet.totalEarnings -= overpayment;
+          } else {
+            wallet.usdtBalance -= overpayment;
+            wallet.totalEarnings -= overpayment;
+          }
+          await wallet.save();
+        }
+      }
+      
+      return {
+        success: true,
+        overpaymentRemoved: overpayment,
+        transactionsRemoved: transactionsToRemove.length
+      };
+    } catch (error) {
+      this.logger.error(`Error fixing duplicate transactions for investment ${investment._id}:`, error);
+      return { success: false, overpaymentRemoved: 0, transactionsRemoved: 0 };
+    }
+  }
+
+  // Fix total mismatch
+  private async fixTotalMismatch(investment: InvestmentDocument): Promise<void> {
+    try {
+      const roiTransactions = await this.transactionModel.find({
+        userId: investment.userId,
+        type: 'roi',
+        status: TransactionStatus.SUCCESS
+      });
+      
+      const correctTotal = roiTransactions.reduce((sum, tx) => sum + tx.amount, 0);
+      
+      await this.investmentModel.updateOne(
+        { _id: investment._id },
+        { $set: { totalAccumulatedRoi: correctTotal } }
+      );
+    } catch (error) {
+      this.logger.error(`Error fixing total mismatch for investment ${investment._id}:`, error);
+    }
+  }
+
+  // Fix wallet mismatch
+  private async fixWalletMismatch(investment: InvestmentDocument): Promise<void> {
+    try {
+      const roiTransactions = await this.transactionModel.find({
+        userId: investment.userId,
+        type: 'roi',
+        status: TransactionStatus.SUCCESS
+      });
+      
+      const correctTotal = roiTransactions.reduce((sum, tx) => sum + tx.amount, 0);
+      const wallet = await this.walletService.findByUserAndType(investment.userId.toString(), WalletType.MAIN);
+      
+      if (wallet) {
+        if (investment.currency === 'naira') {
+          wallet.nairaBalance = correctTotal;
+          wallet.totalEarnings = correctTotal;
+        } else {
+          wallet.usdtBalance = correctTotal;
+          wallet.totalEarnings = correctTotal;
+        }
+        await wallet.save();
+      }
+    } catch (error) {
+      this.logger.error(`Error fixing wallet mismatch for investment ${investment._id}:`, error);
+    }
+  }
+
+  // Fix overpayment
+  private async fixOverpayment(investment: InvestmentDocument): Promise<void> {
+    try {
+      const expectedReturn = investment.expectedReturn;
+      const currentTotal = investment.totalAccumulatedRoi || 0;
+      
+      if (currentTotal > expectedReturn) {
+        const overpayment = currentTotal - expectedReturn;
+        
+        // Cap the total at expected return
+        await this.investmentModel.updateOne(
+          { _id: investment._id },
+          { $set: { totalAccumulatedRoi: expectedReturn } }
+        );
+        
+        // Adjust wallet balance
+        const wallet = await this.walletService.findByUserAndType(investment.userId.toString(), WalletType.MAIN);
+        if (wallet) {
+          if (investment.currency === 'naira') {
+            wallet.nairaBalance -= overpayment;
+            wallet.totalEarnings -= overpayment;
+          } else {
+            wallet.usdtBalance -= overpayment;
+            wallet.totalEarnings -= overpayment;
+          }
+          await wallet.save();
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Error fixing overpayment for investment ${investment._id}:`, error);
+    }
+  }
+
   private async createRoiTransaction(investment: InvestmentDocument, amount: number, type: 'daily' | 'completion' | 'hourly' | '24-hour-cycle'): Promise<TransactionDocument> {
-    // Check if a similar transaction already exists for this investment within the last 60 seconds
-    // This prevents duplicate transactions when cron job runs every minute
-    const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
+    // For 24-hour cycle transactions, check if one already exists for today
+    if (type === '24-hour-cycle') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      
+      const existingTodayTransaction = await this.transactionModel.findOne({
+        userId: investment.userId,
+        investmentId: investment._id,
+        type: 'roi',
+        status: TransactionStatus.SUCCESS,
+        createdAt: { $gte: today, $lt: tomorrow },
+        amount: { $gte: amount * 0.99, $lte: amount * 1.01 },
+        currency: investment.currency,
+        description: { $regex: /24-Hour Cycle.*ROI.*investment/i }
+      });
+
+      if (existingTodayTransaction) {
+        this.logger.log(`⏭️ Skipping duplicate 24-hour ROI transaction for investment ${investment._id} - transaction already exists today`);
+        this.logger.log(`   Existing: ${existingTodayTransaction.amount} ${existingTodayTransaction.currency} at ${existingTodayTransaction.createdAt}`);
+        this.logger.log(`   Attempted: ${amount} ${investment.currency} at ${new Date()}`);
+        return existingTodayTransaction;
+      }
+    }
+
+    // For other transaction types, check if a similar transaction already exists within the last 5 minutes
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     const existingTransaction = await this.transactionModel.findOne({
       userId: investment.userId,
       investmentId: investment._id,
       type: 'roi',
       status: TransactionStatus.SUCCESS,
-      createdAt: { $gte: sixtySecondsAgo },
-      // Use a range for amount to handle floating point precision issues
+      createdAt: { $gte: fiveMinutesAgo },
       amount: { $gte: amount * 0.99, $lte: amount * 1.01 },
-      currency: investment.currency,
-      description: { $regex: new RegExp(`${type}.*ROI.*investment.*${investment._id}`, 'i') }
+      currency: investment.currency
     });
 
     if (existingTransaction) {
-      this.logger.log(`⏭️ Skipping duplicate ROI transaction for investment ${investment._id} - transaction already exists within last 60 seconds`);
+      this.logger.log(`⏭️ Skipping duplicate ROI transaction for investment ${investment._id} - transaction already exists within last 5 minutes`);
       this.logger.log(`   Existing: ${existingTransaction.amount} ${existingTransaction.currency} at ${existingTransaction.createdAt}`);
       this.logger.log(`   Attempted: ${amount} ${investment.currency} at ${new Date()}`);
       return existingTransaction;
-    }
-
-    // Additional check: Look for any ROI transaction in the last 5 minutes for this investment
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    const recentRoiTransaction = await this.transactionModel.findOne({
-      userId: investment.userId,
-      investmentId: investment._id,
-      type: 'roi',
-      status: TransactionStatus.SUCCESS,
-      createdAt: { $gte: fiveMinutesAgo }
-    });
-
-    if (recentRoiTransaction) {
-      this.logger.log(`⚠️ Recent ROI transaction found for investment ${investment._id} within last 5 minutes`);
-      this.logger.log(`   Recent: ${recentRoiTransaction.amount} ${recentRoiTransaction.currency} at ${recentRoiTransaction.createdAt}`);
-      this.logger.log(`   Current: ${amount} ${investment.currency} at ${new Date()}`);
     }
 
     const transaction = new this.transactionModel({

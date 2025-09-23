@@ -148,3 +148,7 @@ async function verifyVanguardInvestment() {
 // Run the verification
 verifyVanguardInvestment();
 
+
+
+
+
