@@ -189,6 +189,10 @@ export class Transaction {
   @Prop({ default: null })
   tags?: string[];
 
+  @ApiProperty({ description: 'Idempotency key for ROI 24h cycle (investmentId-YYYY-MM-DD)' })
+  @Prop({ type: String, default: null })
+  roiCycleKey?: string | null;
+
   @ApiProperty({ description: 'Transaction priority' })
   @Prop({ default: 0 })
   priority: number;
@@ -405,3 +409,6 @@ TransactionSchema.methods.reverse = function(reversedBy: Types.ObjectId, reason:
   }
   throw new Error('Transaction cannot be reversed');
 }; 
+
+// Ensure idempotency for ROI cycle credits
+TransactionSchema.index({ roiCycleKey: 1 }, { unique: true, sparse: true });

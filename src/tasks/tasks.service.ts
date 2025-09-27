@@ -231,7 +231,15 @@ export class TasksService implements OnModuleInit {
                 : investment.userId.toString();
               
               try {
-                if (investment.currency === 'naira') {
+                // Double-check idempotency before crediting wallet (fast path)
+                const dayKey = new Date(now);
+                dayKey.setHours(0, 0, 0, 0);
+                const roiCycleKey = `${investment._id.toString()}-${dayKey.toISOString().slice(0,10)}`;
+                const alreadyCredited = await this.transactionModel.exists({ roiCycleKey });
+
+                if (alreadyCredited) {
+                  this.logger.log(`⏭️ Idempotency guard: ROI already credited for ${roiCycleKey}, skipping wallet deposit.`);
+                } else if (investment.currency === 'naira') {
                   await this.walletService.deposit(userIdString, {
                     walletType: WalletType.MAIN,
                     amount: payoutAmount,
@@ -1083,6 +1091,14 @@ export class TasksService implements OnModuleInit {
       return existingTransaction;
     }
 
+    // Build idempotency roiCycleKey for 24-hour cycle
+    let roiCycleKey: string | undefined = undefined;
+    if (type === '24-hour-cycle') {
+      const day = new Date();
+      day.setHours(0, 0, 0, 0);
+      roiCycleKey = `${investment._id.toString()}-${day.toISOString().slice(0,10)}`;
+    }
+
     const transaction = new this.transactionModel({
       userId: investment.userId,
       type: 'roi',
@@ -1095,9 +1111,23 @@ export class TasksService implements OnModuleInit {
       planId: investment.planId,
       processedAt: new Date(),
       isAutomated: true,
+      roiCycleKey,
     });
     
-    const savedTransaction = await transaction.save();
+    // Save transaction guarded by unique roiCycleKey
+    let savedTransaction: TransactionDocument;
+    try {
+      savedTransaction = await transaction.save();
+    } catch (err) {
+      // If unique index hits due to concurrency, fetch and return existing transaction
+      if (err && err.code === 11000 && roiCycleKey) {
+        this.logger.log(`⏭️ Idempotent save hit unique roiCycleKey=${roiCycleKey}; returning existing transaction.`);
+        const existing = await this.transactionModel.findOne({ roiCycleKey });
+        if (existing) return existing as TransactionDocument;
+        throw err;
+      }
+      throw err;
+    }
     this.logger.log(`✅ Created ROI transaction: ${savedTransaction._id} for investment ${investment._id} - ${amount} ${investment.currency} (${type})`);
     
     return savedTransaction;
