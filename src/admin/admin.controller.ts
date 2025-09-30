@@ -238,6 +238,7 @@ export class AdminController {
   @ApiOperation({ summary: 'Get all wallets (Admin only)' })
   @ApiResponse({ status: 200, description: 'Wallets retrieved successfully' })
   @ApiQuery({ name: 'status', required: false, enum: ['active', 'suspended', 'locked'] })
+  @ApiQuery({ name: 'email', required: false, type: String, description: 'Search by user email' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   async getAllWallets(@Query() query: any) {

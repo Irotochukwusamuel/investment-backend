@@ -889,6 +889,7 @@ export class AdminService {
           currency: 1,
           status: 1,
           reference: 1,
+          withdrawalMethod: 1,
           bankDetails: 1,
           fee: 1,
           netAmount: 1,
@@ -1167,7 +1168,7 @@ export class AdminService {
 
   // Wallet Management
   async getAllWallets(query: any) {
-    const { status, page = 1, limit = 10 } = query;
+    const { status, page = 1, limit = 10, email } = query;
     const filter: any = {};
 
     if (status && status !== 'all') {
@@ -1192,6 +1193,9 @@ export class AdminService {
       {
         $match: {
           'user.isActive': true, // Only include wallets of active users
+          ...(email && {
+            'user.email': { $regex: email, $options: 'i' }
+          }),
           ...filter
         }
       },
@@ -1270,6 +1274,9 @@ export class AdminService {
       {
         $match: {
           'user.isActive': true,
+          ...(email && {
+            'user.email': { $regex: email, $options: 'i' }
+          }),
           ...filter
         }
       },

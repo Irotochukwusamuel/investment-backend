@@ -361,8 +361,9 @@ export class TasksService implements OnModuleInit {
                 // Create final ROI transaction record
                 await this.createRoiTransaction(investment, investment.earnedAmount, 'completion');
                 
-                // Update totalAccumulatedRoi with the final amount
-                investment.totalAccumulatedRoi = (investment.totalAccumulatedRoi || 0) + investment.earnedAmount;
+                // Update totalAccumulatedRoi with calculated monthly ROI amount (exact per month cycle)
+                const monthlyRoiAmount = ((investment.amount * investment.dailyRoi) / 100) * 30;
+                investment.totalAccumulatedRoi = monthlyRoiAmount;
                 
                 // Reset earnedAmount to 0
                 investment.earnedAmount = 0;
@@ -631,6 +632,9 @@ export class TasksService implements OnModuleInit {
       
       this.logger.log(`📊 Checking ${activeInvestments.length} active investments for discrepancies`);
       
+      // Track users whose wallets we have already reconciled to avoid redundant updates
+      const reconciledUsers = new Set<string>();
+      
       for (const investment of activeInvestments) {
         try {
           const issues = await this.checkInvestmentIntegrity(investment);
@@ -640,7 +644,7 @@ export class TasksService implements OnModuleInit {
             this.logger.log(`⚠️  Found ${issues.length} issues for investment ${investment._id}`);
             
             // Fix the issues
-            const fixResult = await this.fixInvestmentIssues(investment, issues);
+            const fixResult = await this.fixInvestmentIssues(investment, issues, reconciledUsers);
             totalIssuesFixed += fixResult.fixed;
             totalOverpaymentRemoved += fixResult.overpaymentRemoved;
             totalTransactionsRemoved += fixResult.transactionsRemoved;
@@ -801,20 +805,23 @@ export class TasksService implements OnModuleInit {
         });
       }
       
-      // Check wallet balance consistency
-      const wallet = await this.walletService.findByUserAndType(investment.userId.toString(), WalletType.MAIN);
-      if (wallet) {
-        const expectedBalance = transactionTotal + (wallet.lockedNairaBonuses || 0) + (wallet.lockedUsdtBonuses || 0);
-        const actualBalance = investment.currency === 'naira' ? wallet.nairaBalance : wallet.usdtBalance;
-        
-        if (Math.abs(actualBalance - expectedBalance) > 1) {
+      // Check wallet balance consistency using full transaction history reconciliation
+      try {
+        const userId = investment.userId.toString();
+        const currency = investment.currency as 'naira' | 'usdt';
+        const { expectedAvailableBalance } = await this.computeExpectedAvailableBalance(userId, currency);
+        const wallet = await this.walletService.findByUserAndType(userId, WalletType.MAIN);
+        const actualBalance = currency === 'naira' ? wallet.nairaBalance : wallet.usdtBalance;
+        if (Math.abs(actualBalance - expectedAvailableBalance) > 1) {
           issues.push({
             type: 'wallet_mismatch',
-            description: `Wallet balance (₦${actualBalance.toLocaleString()}) doesn't match expected balance (₦${expectedBalance.toLocaleString()})`,
+            description: `Wallet ${currency} balance (${actualBalance.toLocaleString()}) != expected (${expectedAvailableBalance.toLocaleString()})`,
             severity: 'medium',
-            data: { actualBalance, expectedBalance, difference: actualBalance - expectedBalance }
+            data: { actualBalance, expectedBalance: expectedAvailableBalance, difference: actualBalance - expectedAvailableBalance }
           });
         }
+      } catch (e) {
+        this.logger.error(`Error computing expected wallet balance for user ${investment.userId}:`, e);
       }
       
       // Check for overpayment (total accumulated ROI exceeds expected return)
@@ -841,7 +848,7 @@ export class TasksService implements OnModuleInit {
     description: string;
     severity: 'low' | 'medium' | 'high';
     data?: any;
-  }>): Promise<{
+  }>, reconciledUsers?: Set<string>): Promise<{
     fixed: number;
     overpaymentRemoved: number;
     transactionsRemoved: number;
@@ -868,7 +875,11 @@ export class TasksService implements OnModuleInit {
             break;
             
           case 'wallet_mismatch':
-            await this.fixWalletMismatch(investment);
+            // Reconcile wallet once per user per integrity run
+            if (reconciledUsers && !reconciledUsers.has(investment.userId.toString())) {
+              await this.fixWalletMismatch(investment);
+              reconciledUsers.add(investment.userId.toString());
+            }
             fixed++;
             break;
             
@@ -940,18 +951,8 @@ export class TasksService implements OnModuleInit {
           { $set: { totalAccumulatedRoi: correctTotal } }
         );
         
-        // Update wallet balance
-        const wallet = await this.walletService.findByUserAndType(investment.userId.toString(), WalletType.MAIN);
-        if (wallet) {
-          if (investment.currency === 'naira') {
-            wallet.nairaBalance -= overpayment;
-            wallet.totalEarnings -= overpayment;
-          } else {
-            wallet.usdtBalance -= overpayment;
-            wallet.totalEarnings -= overpayment;
-          }
-          await wallet.save();
-        }
+        // Reconcile wallet from full transaction history (safer than manual subtraction)
+        await this.reconcileWalletFromTransactions(investment.userId.toString());
       }
       
       return {
@@ -988,25 +989,8 @@ export class TasksService implements OnModuleInit {
   // Fix wallet mismatch
   private async fixWalletMismatch(investment: InvestmentDocument): Promise<void> {
     try {
-      const roiTransactions = await this.transactionModel.find({
-        userId: investment.userId,
-        type: 'roi',
-        status: TransactionStatus.SUCCESS
-      });
-      
-      const correctTotal = roiTransactions.reduce((sum, tx) => sum + tx.amount, 0);
-      const wallet = await this.walletService.findByUserAndType(investment.userId.toString(), WalletType.MAIN);
-      
-      if (wallet) {
-        if (investment.currency === 'naira') {
-          wallet.nairaBalance = correctTotal;
-          wallet.totalEarnings = correctTotal;
-        } else {
-          wallet.usdtBalance = correctTotal;
-          wallet.totalEarnings = correctTotal;
-        }
-        await wallet.save();
-      }
+      // Instead of overwriting based on ROI only, reconcile using all transactions
+      await this.reconcileWalletFromTransactions(investment.userId.toString());
     } catch (error) {
       this.logger.error(`Error fixing wallet mismatch for investment ${investment._id}:`, error);
     }
@@ -1027,21 +1011,97 @@ export class TasksService implements OnModuleInit {
           { $set: { totalAccumulatedRoi: expectedReturn } }
         );
         
-        // Adjust wallet balance
-        const wallet = await this.walletService.findByUserAndType(investment.userId.toString(), WalletType.MAIN);
-        if (wallet) {
-          if (investment.currency === 'naira') {
-            wallet.nairaBalance -= overpayment;
-            wallet.totalEarnings -= overpayment;
-          } else {
-            wallet.usdtBalance -= overpayment;
-            wallet.totalEarnings -= overpayment;
-          }
-          await wallet.save();
-        }
+        // Reconcile wallet from transactions to reflect removed ROI
+        await this.reconcileWalletFromTransactions(investment.userId.toString());
       }
     } catch (error) {
       this.logger.error(`Error fixing overpayment for investment ${investment._id}:`, error);
+    }
+  }
+
+  // Compute expected available balance from full transaction history for a user and currency
+  private async computeExpectedAvailableBalance(userId: string, currency: 'naira' | 'usdt'): Promise<{
+    expectedAvailableBalance: number;
+    totals: {
+      deposits: number;
+      withdrawals: number;
+      investments: number;
+      roi: number;
+      bonuses: number;
+      referrals: number;
+      adjustments: number;
+    };
+  }> {
+    const txModel = this.transactionModel;
+    const userObjectId = new Types.ObjectId(userId);
+
+    const successTx = await txModel.find({
+      userId: userObjectId,
+      status: TransactionStatus.SUCCESS,
+      currency,
+    }).select('type amount');
+
+    const totals = {
+      deposits: 0,
+      withdrawals: 0,
+      investments: 0,
+      roi: 0,
+      bonuses: 0,
+      referrals: 0,
+      adjustments: 0,
+    };
+
+    for (const tx of successTx) {
+      switch (tx.type) {
+        case TransactionType.DEPOSIT:
+          totals.deposits += tx.amount;
+          break;
+        case TransactionType.WITHDRAWAL:
+          totals.withdrawals += tx.amount;
+          break;
+        case TransactionType.INVESTMENT:
+          totals.investments += tx.amount;
+          break;
+        case TransactionType.ROI:
+          totals.roi += tx.amount;
+          break;
+        case TransactionType.BONUS:
+          totals.bonuses += tx.amount;
+          break;
+        case TransactionType.REFERRAL:
+          totals.referrals += tx.amount;
+          break;
+        case TransactionType.ADJUSTMENT:
+          totals.adjustments += tx.amount; // positive or negative adjustments captured as signed amounts
+          break;
+      }
+    }
+
+    const expectedAvailableBalance =
+      totals.deposits + totals.roi + totals.bonuses + totals.referrals + totals.adjustments -
+      (totals.withdrawals + totals.investments);
+
+    return { expectedAvailableBalance, totals };
+  }
+
+  // Reconcile wallet balances for both currencies from full transaction history
+  private async reconcileWalletFromTransactions(userId: string): Promise<void> {
+    try {
+      const wallet = await this.walletService.findByUserAndType(userId, WalletType.MAIN);
+      const naira = await this.computeExpectedAvailableBalance(userId, 'naira');
+      const usdt = await this.computeExpectedAvailableBalance(userId, 'usdt');
+
+      const beforeNaira = wallet.nairaBalance;
+      const beforeUsdt = wallet.usdtBalance;
+
+      wallet.nairaBalance = Math.max(0, Math.round(naira.expectedAvailableBalance));
+      wallet.usdtBalance = Math.max(0, Math.round(usdt.expectedAvailableBalance));
+
+      await wallet.save();
+
+      this.logger.log(`🔁 Reconciled wallet for user ${userId}: ₦${beforeNaira.toLocaleString()} → ₦${wallet.nairaBalance.toLocaleString()}, $${beforeUsdt} → $${wallet.usdtBalance}`);
+    } catch (error) {
+      this.logger.error(`Error reconciling wallet for user ${userId}:`, error);
     }
   }
 

@@ -63,5 +63,14 @@ export class TasksController {
     return { message: 'Countdown management triggered successfully' };
   }
 
+  @Post('trigger-roi-integrity-check')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Manually trigger ROI integrity check' })
+  @ApiResponse({ status: 200, description: 'ROI integrity check triggered successfully' })
+  async triggerRoiIntegrityCheck() {
+    await this.tasksService.triggerRoiIntegrityCheck();
+    return { message: 'ROI integrity check triggered successfully' };
+  }
+
 
 } 

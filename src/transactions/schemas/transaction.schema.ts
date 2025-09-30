@@ -190,7 +190,7 @@ export class Transaction {
   tags?: string[];
 
   @ApiProperty({ description: 'Idempotency key for ROI 24h cycle (investmentId-YYYY-MM-DD)' })
-  @Prop({ type: String, default: null })
+  @Prop({ type: String })
   roiCycleKey?: string | null;
 
   @ApiProperty({ description: 'Transaction priority' })
