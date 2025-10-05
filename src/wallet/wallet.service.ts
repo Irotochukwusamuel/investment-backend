@@ -96,6 +96,16 @@ export class WalletService {
 
   async deposit(userId: string, depositDto: DepositDto): Promise<WalletDocument> {
     const { walletType, amount, currency, description } = depositDto;
+
+    // SAFETY GUARD: Route any bonus-like deposits to locked bonus handler
+    // This prevents welcome/referral/bonus rewards from leaking into available balance.
+    if (description) {
+      const desc = description.toLowerCase();
+      const isBonusLike = desc.includes('bonus') || desc.includes('welcome') || desc.includes('referral') || desc.includes('reward');
+      if (isBonusLike) {
+        return this.depositBonus(userId, depositDto);
+      }
+    }
     
     // Always use main wallet for all deposits
     let wallet: WalletDocument | null = await this.walletModel.findOne({
@@ -105,6 +115,7 @@ export class WalletService {
 
     if (!wallet) {
       // Create main wallet if it doesn't exist
+      // Note: bonus-like deposits are already redirected above; plain deposits can seed balance.
       wallet = await this.create({
         userId,
         type: WalletType.MAIN,
